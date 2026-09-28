@@ -324,6 +324,10 @@ private fun YouTubeScreen(initialUrl: String, header: @Composable () -> Unit) {
                                     append(media.formatCount)
                                     append(" formats")
                                 }
+                                if (media.extractor.isNotBlank()) {
+                                    if (isNotEmpty()) append(" · ")
+                                    append(media.extractor)
+                                }
                             },
                             style = TossType.Caption,
                             color = Toss.Text3
