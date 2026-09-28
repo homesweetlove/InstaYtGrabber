@@ -256,7 +256,8 @@ def download(url, output_dir, cookie_header="", kind="post"):
     include_map = {
         "story": "stories",
         "highlight": "highlights",
-        "post": "posts,reels",
+        "post": "posts",
+        "reel": "reels",
     }
 
     settings = [
