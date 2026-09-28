@@ -211,8 +211,8 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
                 when (section) {
                     InstagramSection.STORY -> "프로필 사진 + 현재 스토리"
                     InstagramSection.HIGHLIGHT -> "하이라이트 묶음"
-                    InstagramSection.POST -> "최근 게시글 24개"
-                    InstagramSection.REEL -> "최근 릴스 24개"
+                    InstagramSection.POST -> "게시글 전체"
+                    InstagramSection.REEL -> "릴스 전체"
                 },
                 style = MaterialTheme.typography.labelMedium
             )
