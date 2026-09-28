@@ -43,6 +43,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramCatalogItem
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramCatalogSection
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramEngine
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramMediaType
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramOutputType
@@ -51,61 +52,126 @@ import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileCatalo
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramSession
 import kotlinx.coroutines.launch
 
-private enum class InstagramSection(val label: String) {
-    STORY("스토리"),
-    HIGHLIGHT("하이라이트"),
-    POST("게시글"),
-    REEL("릴스")
+private enum class InstagramSection(
+    val label: String,
+    val catalogSection: InstagramCatalogSection
+) {
+    STORY("스토리", InstagramCatalogSection.STORIES),
+    HIGHLIGHT("하이라이트", InstagramCatalogSection.HIGHLIGHTS),
+    POST("게시글", InstagramCatalogSection.POSTS),
+    REEL("릴스", InstagramCatalogSection.REELS)
 }
 
 @Composable
 fun InstagramProfileBrowserScreen(initialUrl: String) {
     var url by remember { mutableStateOf(initialUrl) }
     var section by remember { mutableStateOf(InstagramSection.STORY) }
-    var catalog by remember { mutableStateOf<InstagramProfileCatalog?>(null) }
+    var profile by remember { mutableStateOf<InstagramProfileCatalog?>(null) }
+    var stories by remember { mutableStateOf<List<InstagramCatalogItem>>(emptyList()) }
+    var highlights by remember { mutableStateOf<List<InstagramCatalogItem>>(emptyList()) }
+    var posts by remember { mutableStateOf<List<InstagramCatalogItem>>(emptyList()) }
+    var reels by remember { mutableStateOf<List<InstagramCatalogItem>>(emptyList()) }
+    var loadedSections by remember { mutableStateOf(setOf<InstagramSection>()) }
+    var loadingSections by remember { mutableStateOf(setOf<InstagramSection>()) }
     var selected by remember { mutableStateOf(setOf<String>()) }
-    var loading by remember { mutableStateOf(false) }
+    var baseLoading by remember { mutableStateOf(false) }
     var downloading by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("Instagram 프로필 링크를 넣고 불러오기를 누르세요.") }
     var loginDialog by remember { mutableStateOf(false) }
     var loggedIn by remember { mutableStateOf(InstagramSession.isLoggedIn()) }
     val scope = rememberCoroutineScope()
 
-    fun loadProfile() {
+    fun sectionItems(target: InstagramSection): List<InstagramCatalogItem> =
+        when (target) {
+            InstagramSection.STORY -> stories
+            InstagramSection.HIGHLIGHT -> highlights
+            InstagramSection.POST -> posts
+            InstagramSection.REEL -> reels
+        }
+
+    fun loadSection(
+        target: InstagramSection,
+        base: InstagramProfileCatalog? = profile,
+        force: Boolean = false
+    ) {
+        val current = base ?: return
+        if (!force && (target in loadedSections || target in loadingSections)) return
+
         scope.launch {
-            loading = true
-            catalog = null
-            selected = emptySet()
-            status = "프로필 정보와 미디어 목록을 불러오는 중…"
-            InstagramProfileCatalogEngine.load(url).fold(
-                onSuccess = {
-                    catalog = it
-                    status = "@" + it.username +
-                        " · 스토리 " + it.stories.size +
-                        " · 하이라이트 " + it.highlights.size +
-                        " · 게시글 " + it.posts.size +
-                        " · 릴스 " + it.reels.size
+            loadingSections = loadingSections + target
+            status = target.label + " 전체 불러오는 중…"
+
+            InstagramProfileCatalogEngine.loadSection(
+                profileUrl = url,
+                section = target.catalogSection,
+                isPrivate = current.isPrivate
+            ).fold(
+                onSuccess = { items ->
+                    when (target) {
+                        InstagramSection.STORY -> stories = items
+                        InstagramSection.HIGHLIGHT -> highlights = items
+                        InstagramSection.POST -> posts = items
+                        InstagramSection.REEL -> reels = items
+                    }
+                    loadedSections = loadedSections + target
+                    status = target.label + " " + items.size + "개 불러옴"
                 },
-                onFailure = {
-                    status = "불러오기 실패 · " + (it.message ?: it.javaClass.simpleName)
+                onFailure = { error ->
+                    status = target.label + " 불러오기 실패 · " +
+                        (error.message ?: error.javaClass.simpleName)
                 }
             )
-            loading = false
+
+            loadingSections = loadingSections - target
         }
     }
 
-    val visibleItems = catalog?.let { current ->
-        when (section) {
-            InstagramSection.STORY -> listOfNotNull(current.avatar) + current.stories
-            InstagramSection.HIGHLIGHT -> current.highlights
-            InstagramSection.POST -> current.posts
-            InstagramSection.REEL -> current.reels
-        }
-    }.orEmpty()
+    fun loadProfile() {
+        scope.launch {
+            baseLoading = true
+            profile = null
+            stories = emptyList()
+            highlights = emptyList()
+            posts = emptyList()
+            reels = emptyList()
+            loadedSections = emptySet()
+            loadingSections = emptySet()
+            selected = emptySet()
+            section = InstagramSection.STORY
+            status = "프로필 정보 불러오는 중…"
 
-    val allItems = catalog?.let {
-        listOfNotNull(it.avatar) + it.stories + it.highlights + it.posts + it.reels
-    }.orEmpty()
+            InstagramProfileCatalogEngine.loadBase(url).fold(
+                onSuccess = { loaded ->
+                    profile = loaded
+                    status = "@" + loaded.username + " 프로필 불러옴"
+                    loadSection(InstagramSection.STORY, loaded)
+                },
+                onFailure = { error ->
+                    status = "프로필 불러오기 실패 · " +
+                        (error.message ?: error.javaClass.simpleName)
+                }
+            )
+
+            baseLoading = false
+        }
+    }
+
+    val visibleItems = buildList {
+        if (section == InstagramSection.STORY) {
+            profile?.avatar?.let(::add)
+        }
+        addAll(sectionItems(section))
+    }
+
+    val allItems = buildList {
+        profile?.avatar?.let(::add)
+        addAll(stories)
+        addAll(highlights)
+        addAll(posts)
+        addAll(reels)
+    }
+
+    val currentSectionLoading = section in loadingSections
 
     Column(
         modifier = Modifier
@@ -115,7 +181,7 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
     ) {
         Text("Instagram", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "프로필 링크 하나로 목록을 먼저 불러온 뒤 원하는 항목만 선택해서 최고 화질로 저장합니다.",
+            "프로필은 먼저 바로 표시하고, 스토리·하이라이트·게시글·릴스는 탭별로 전체 목록을 불러옵니다.",
             style = MaterialTheme.typography.bodyMedium
         )
 
@@ -130,14 +196,14 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
-                enabled = url.isNotBlank() && !loading && !downloading,
+                enabled = url.isNotBlank() && !baseLoading && !downloading,
                 onClick = { loadProfile() }
             ) {
-                Text(if (loading) "불러오는 중…" else "프로필 불러오기")
+                Text(if (baseLoading) "불러오는 중…" else "프로필 불러오기")
             }
 
             OutlinedButton(
-                enabled = !loading && !downloading,
+                enabled = !baseLoading && !downloading,
                 onClick = { loginDialog = true }
             ) {
                 Text(if (loggedIn) "로그인 갱신" else "Instagram 로그인")
@@ -156,18 +222,18 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
             }
         }
 
-        if (loading) {
+        if (baseLoading || currentSectionLoading) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
 
-        catalog?.let { profile ->
+        profile?.let { current ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    profile.avatar?.let {
+                    current.avatar?.let {
                         AsyncImage(
                             model = it.previewUrl,
                             contentDescription = "프로필 사진",
@@ -175,19 +241,20 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
                             contentScale = ContentScale.Crop
                         )
                     }
+
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = profile.fullName.ifBlank { "@" + profile.username },
+                            text = current.fullName.ifBlank { "@" + current.username },
                             style = MaterialTheme.typography.titleMedium
                         )
                         Text(
-                            text = "@" + profile.username +
-                                if (profile.isPrivate) " · 비공개" else " · 공개",
+                            text = "@" + current.username +
+                                if (current.isPrivate) " · 비공개" else " · 공개",
                             style = MaterialTheme.typography.bodySmall
                         )
-                        if (profile.biography.isNotBlank()) {
+                        if (current.biography.isNotBlank()) {
                             Text(
-                                text = profile.biography,
+                                text = current.biography,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.bodySmall
@@ -201,28 +268,23 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
                 InstagramSection.entries.forEach { item ->
                     FilterChip(
                         selected = section == item,
-                        onClick = { section = item },
+                        onClick = {
+                            section = item
+                            loadSection(item)
+                        },
                         label = { Text(item.label) }
                     )
                 }
             }
 
             Text(
-                when (section) {
-                    InstagramSection.STORY -> "프로필 사진 + 현재 스토리"
-                    InstagramSection.HIGHLIGHT -> "하이라이트 묶음"
-                    InstagramSection.POST -> "게시글 전체"
-                    InstagramSection.REEL -> "릴스 전체"
+                when {
+                    currentSectionLoading -> section.label + " 전체 불러오는 중…"
+                    section !in loadedSections -> section.label + " 탭을 눌러 전체 목록 불러오기"
+                    else -> section.label + " " + sectionItems(section).size + "개"
                 },
                 style = MaterialTheme.typography.labelMedium
             )
-
-            if (visibleItems.isEmpty()) {
-                Text(
-                    "표시할 항목이 없습니다. 스토리/하이라이트는 로그인이 필요한 경우가 있습니다.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
         }
 
         LazyColumn(
@@ -251,13 +313,26 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedButton(
+                enabled = profile != null && !currentSectionLoading && !downloading,
+                onClick = {
+                    if (section in loadedSections) {
+                        loadSection(section, force = true)
+                    } else {
+                        loadSection(section)
+                    }
+                }
+            ) {
+                Text(if (section in loadedSections) "새로고침" else "전체 불러오기")
+            }
+
+            OutlinedButton(
                 enabled = visibleItems.isNotEmpty() && !downloading,
                 onClick = {
                     val keys = visibleItems.map { it.selectionKey() }.toSet()
                     selected = if (keys.all { it in selected }) selected - keys else selected + keys
                 }
             ) {
-                Text("현재 탭 전체 선택")
+                Text("전체 선택")
             }
 
             Button(
@@ -284,7 +359,7 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
                                 url = item.targetUrl,
                                 type = type,
                                 output = InstagramOutputType.MEDIA,
-                                allowAuthenticatedFallback = catalog?.isPrivate == true
+                                allowAuthenticatedFallback = profile?.isPrivate == true
                             ) { progress ->
                                 if (progress.percent > 0f) {
                                     status = (index + 1).toString() + "/" + chosen.size +
@@ -303,7 +378,7 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
             ) {
                 Text(
                     if (downloading) "저장 중…"
-                    else "선택 항목 저장 (" + selected.size + ")"
+                    else "저장 (" + selected.size + ")"
                 )
             }
         }
@@ -311,9 +386,9 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
         Text(status, style = MaterialTheme.typography.bodySmall)
         Text(
             if (loggedIn) {
-                "공개 콘텐츠는 로그인 쿠키 없이 먼저 조회하고, 필요한 항목만 로그인 세션으로 재시도합니다."
+                "공개 프로필은 로그인 쿠키 없이 조회·다운로드하고, 비공개 프로필만 연결한 세션을 사용합니다."
             } else {
-                "공개 콘텐츠는 비로그인 상태로 조회합니다."
+                "공개 프로필은 비로그인으로 조회합니다."
             },
             style = MaterialTheme.typography.bodySmall
         )
