@@ -43,50 +43,35 @@ object InstagramProfileCatalogEngine {
         context: Context,
         profileUrl: String
     ): Result<InstagramProfileCatalog> {
-        val browserAnonymous = InstagramWebCatalogEngine.loadBase(
+        val instaloader = withContext(Dispatchers.IO) {
+            runCatching { callInstaloaderBase(profileUrl, "") }
+        }
+        if (instaloader.isSuccess) return instaloader
+
+        val browser = InstagramWebCatalogEngine.loadBase(
             context = context,
             profileUrl = profileUrl,
             authenticated = false
         )
-        if (browserAnonymous.isSuccess) return browserAnonymous
+        if (browser.isSuccess) return browser
 
-        val pythonAnonymous = withContext(Dispatchers.IO) {
+        val gallery = withContext(Dispatchers.IO) {
             runCatching {
-                callCatalog(
+                callGalleryCatalog(
                     profileUrl = profileUrl,
                     cookieHeader = "",
                     sections = "info,avatar"
                 )
             }
         }
-        if (pythonAnonymous.isSuccess) return pythonAnonymous
-
-        val cookie = InstagramSession.cookie()
-        if (!cookie.isNullOrBlank()) {
-            val browserAuthenticated = InstagramWebCatalogEngine.loadBase(
-                context = context,
-                profileUrl = profileUrl,
-                authenticated = true
-            )
-            if (browserAuthenticated.isSuccess) return browserAuthenticated
-
-            return withContext(Dispatchers.IO) {
-                runCatching {
-                    callCatalog(
-                        profileUrl = profileUrl,
-                        cookieHeader = cookie,
-                        sections = "info,avatar"
-                    )
-                }
-            }
-        }
+        if (gallery.isSuccess) return gallery
 
         return Result.failure(
             IllegalStateException(
-                "Instagram 프로필을 불러오지 못했습니다. 브라우저: " +
-                    browserAnonymous.exceptionOrNull()?.message +
-                    " / API: " +
-                    pythonAnonymous.exceptionOrNull()?.message
+                "Instagram 프로필을 불러오지 못했습니다. " +
+                    "Instaloader: " + (instaloader.exceptionOrNull()?.message ?: "unknown") +
+                    " / Web: " + (browser.exceptionOrNull()?.message ?: "unknown") +
+                    " / gallery-dl: " + (gallery.exceptionOrNull()?.message ?: "unknown")
             )
         )
     }
@@ -98,6 +83,23 @@ object InstagramProfileCatalogEngine {
         isPrivate: Boolean,
         onProgress: (Int) -> Unit = {}
     ): Result<List<InstagramCatalogItem>> {
+        val cookie = if (isPrivate) InstagramSession.cookie().orEmpty() else ""
+
+        val instaloader = withContext(Dispatchers.IO) {
+            runCatching {
+                callInstaloaderSection(
+                    profileUrl = profileUrl,
+                    section = section,
+                    cookieHeader = cookie
+                )
+            }
+        }
+        if (instaloader.isSuccess) {
+            val items = instaloader.getOrThrow()
+            onProgress(items.size)
+            return instaloader
+        }
+
         if (section == InstagramCatalogSection.POSTS ||
             section == InstagramCatalogSection.REELS
         ) {
@@ -113,40 +115,93 @@ object InstagramProfileCatalogEngine {
                 return browser
             }
 
-            val fallback = loadSectionViaPython(
+            val gallery = loadSectionViaGallery(
                 profileUrl = profileUrl,
                 section = section,
                 isPrivate = isPrivate
             )
-
-            if (fallback.isSuccess) return fallback
+            if (gallery.isSuccess) return gallery
             if (browser.isSuccess) return browser
 
             return Result.failure(
                 IllegalStateException(
-                    section.wireName + " 불러오기 실패. 브라우저: " +
-                        browser.exceptionOrNull()?.message +
-                        " / API: " +
-                        fallback.exceptionOrNull()?.message
+                    section.wireName + " 불러오기 실패. " +
+                        "Instaloader: " + (instaloader.exceptionOrNull()?.message ?: "unknown") +
+                        " / Web: " + (browser.exceptionOrNull()?.message ?: "unknown") +
+                        " / gallery-dl: " + (gallery.exceptionOrNull()?.message ?: "unknown")
                 )
             )
         }
 
-        return loadSectionViaPython(
+        val gallery = loadSectionViaGallery(
             profileUrl = profileUrl,
             section = section,
             isPrivate = isPrivate
         )
+        if (gallery.isSuccess) return gallery
+
+        return Result.failure(
+            IllegalStateException(
+                section.wireName + " 불러오기 실패. " +
+                    "Instaloader: " + (instaloader.exceptionOrNull()?.message ?: "unknown") +
+                    " / gallery-dl: " + (gallery.exceptionOrNull()?.message ?: "unknown")
+            )
+        )
     }
 
-    private suspend fun loadSectionViaPython(
+    private fun callInstaloaderBase(
+        profileUrl: String,
+        cookieHeader: String
+    ): InstagramProfileCatalog {
+        val raw = Python.getInstance()
+            .getModule("instagram_instaloader")
+            .callAttr("base", profileUrl.trim(), cookieHeader)
+            .toString()
+
+        val root = JSONObject(raw)
+        if (!root.optBoolean("ok", false)) {
+            error(root.optString("error").ifBlank { "Instaloader profile lookup failed" })
+        }
+
+        return InstagramProfileCatalog(
+            username = root.optString("username"),
+            fullName = root.optString("full_name"),
+            biography = root.optString("biography"),
+            isPrivate = root.optBoolean("is_private", false),
+            avatar = root.optJSONObject("avatar")?.let(::parseItem)
+        )
+    }
+
+    private fun callInstaloaderSection(
+        profileUrl: String,
+        section: InstagramCatalogSection,
+        cookieHeader: String
+    ): List<InstagramCatalogItem> {
+        val raw = Python.getInstance()
+            .getModule("instagram_instaloader")
+            .callAttr(
+                "section",
+                profileUrl.trim(),
+                section.wireName,
+                cookieHeader
+            )
+            .toString()
+
+        val root = JSONObject(raw)
+        if (!root.optBoolean("ok", false)) {
+            error(root.optString("error").ifBlank { "Instaloader section lookup failed" })
+        }
+        return parseItems(root.optJSONArray("items"))
+    }
+
+    private suspend fun loadSectionViaGallery(
         profileUrl: String,
         section: InstagramCatalogSection,
         isPrivate: Boolean
     ): Result<List<InstagramCatalogItem>> = withContext(Dispatchers.IO) {
         runCatching {
             val cookie = if (isPrivate) InstagramSession.cookie().orEmpty() else ""
-            val catalog = callCatalog(
+            val catalog = callGalleryCatalog(
                 profileUrl = profileUrl,
                 cookieHeader = cookie,
                 sections = section.wireName
@@ -161,7 +216,7 @@ object InstagramProfileCatalogEngine {
         }
     }
 
-    private fun callCatalog(
+    private fun callGalleryCatalog(
         profileUrl: String,
         cookieHeader: String,
         sections: String
