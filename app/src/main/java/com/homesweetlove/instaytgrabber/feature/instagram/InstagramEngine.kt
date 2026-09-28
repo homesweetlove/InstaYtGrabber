@@ -11,6 +11,11 @@ enum class InstagramMediaType(val label: String, val folder: String) {
     POST("게시글 / 릴스", "post")
 }
 
+enum class InstagramOutputType(val label: String, val folder: String) {
+    MEDIA("원본 미디어", "media"),
+    AUDIO("MP3", "audio")
+}
+
 object InstagramEngine {
     fun accepts(url: String): Boolean =
         runCatching {
@@ -21,16 +26,26 @@ object InstagramEngine {
     suspend fun download(
         url: String,
         type: InstagramMediaType,
+        output: InstagramOutputType,
         onProgress: (GrabProgress) -> Unit
     ): Result<File> {
         require(accepts(url)) { "Instagram 링크를 입력해 주세요." }
-        return GrabberEngine.download(
-            url = url.trim(),
-            kind = GrabKind.MEDIA,
-            folderName = "Instagram/${type.folder}",
-            cookieHeader = InstagramSession.cookie(),
-            allowPlaylist = type == InstagramMediaType.HIGHLIGHT,
-            onProgress = onProgress
-        )
+
+        return when (output) {
+            InstagramOutputType.MEDIA -> InstagramGalleryEngine.download(
+                url = url,
+                type = type,
+                onProgress = onProgress
+            )
+
+            InstagramOutputType.AUDIO -> GrabberEngine.download(
+                url = url.trim(),
+                kind = GrabKind.AUDIO,
+                folderName = "Instagram/${type.folder}/audio",
+                cookieHeader = InstagramSession.cookie(),
+                allowPlaylist = type == InstagramMediaType.HIGHLIGHT,
+                onProgress = onProgress
+            )
+        }
     }
 }
