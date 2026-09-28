@@ -58,5 +58,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          VERSION=$(grep 'versionName = ' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+          APK_NAME="InstaYtGrabber-v${VERSION}-debug.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$APK_NAME"
           gh release delete debug-latest --cleanup-tag -y || true
-          gh release create debug-latest             app/build/outputs/apk/debug/app-debug.apk             --target "$GITHUB_SHA"             --title "InstaYtGrabber Debug"             --notes "Latest automatic debug APK from main."             --prerelease
+          gh release create debug-latest "$APK_NAME" \
+            --target "$GITHUB_SHA" \
+            --title "InstaYtGrabber v${VERSION} Debug" \
+            --notes "Latest automatic debug APK from main." \
+            --prerelease
