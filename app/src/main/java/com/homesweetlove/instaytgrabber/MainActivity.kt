@@ -1,6 +1,8 @@
 package com.homesweetlove.instaytgrabber
 
+import android.Manifest
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.webkit.CookieManager
 import android.webkit.WebView
@@ -43,6 +45,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramEngine
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramMediaType
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramOutputType
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramSession
 import com.homesweetlove.instaytgrabber.feature.youtube.YouTubeEngine
 import com.homesweetlove.instaytgrabber.feature.youtube.YouTubeMediaType
@@ -51,6 +54,9 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
+            requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 100)
+        }
         val sharedUrl = if (intent?.action == Intent.ACTION_SEND) {
             intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
         } else {
@@ -115,6 +121,7 @@ private fun InstaYtGrabberApp(sharedUrl: String) {
 private fun InstagramScreen(initialUrl: String) {
     var url by remember { mutableStateOf(initialUrl) }
     var type by remember { mutableStateOf(InstagramMediaType.POST) }
+    var output by remember { mutableStateOf(InstagramOutputType.MEDIA) }
     var status by remember { mutableStateOf("링크를 붙여 넣어 주세요.") }
     var progress by remember { mutableFloatStateOf(0f) }
     var loginDialog by remember { mutableStateOf(false) }
@@ -140,6 +147,16 @@ private fun InstagramScreen(initialUrl: String) {
                 FilterChip(
                     selected = type == item,
                     onClick = { type = item },
+                    label = { Text(item.label) }
+                )
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            InstagramOutputType.entries.forEach { item ->
+                FilterChip(
+                    selected = output == item,
+                    onClick = { output = item },
                     label = { Text(item.label) }
                 )
             }
@@ -189,20 +206,26 @@ private fun InstagramScreen(initialUrl: String) {
                     progress = 0f
                     status = "추출 준비 중"
                     val result = runCatching {
-                        InstagramEngine.download(url, type) {
+                        InstagramEngine.download(url, type, output) {
                             progress = (it.percent / 100f).coerceIn(0f, 1f)
                             status = "처리 중 ${it.percent.toInt()}%"
                         }.getOrThrow()
                     }
                     status = result.fold(
-                        onSuccess = { "완료 · Downloads/InstaYtGrabber/Instagram/${type.folder}" },
+                        onSuccess = { "완료 · Downloads/InstaYtGrabber/Instagram/${type.folder}/${output.folder}" },
                         onFailure = { "실패 · ${it.message ?: it.javaClass.simpleName}" }
                     )
                     running = false
                 }
             }
         ) {
-            Text(if (running) "처리 중…" else "${type.label} 저장")
+            Text(
+                when {
+                    running -> "처리 중…"
+                    output == InstagramOutputType.AUDIO -> "${type.label} MP3 추출"
+                    else -> "${type.label} 저장"
+                }
+            )
         }
 
         Text(status, style = MaterialTheme.typography.bodySmall)
@@ -292,7 +315,7 @@ private fun YouTubeScreen(initialUrl: String) {
     ) {
         Text("YouTube", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "영상 저장과 MP3 음원 추출을 분리해서 처리합니다.",
+            "영상 저장 · MP3 음원 추출 · 썸네일 저장을 분리해서 처리합니다.",
             style = MaterialTheme.typography.bodyMedium
         )
 
@@ -345,6 +368,7 @@ private fun YouTubeScreen(initialUrl: String) {
                 when {
                     running -> "처리 중…"
                     type == YouTubeMediaType.AUDIO -> "MP3 추출"
+                    type == YouTubeMediaType.THUMBNAIL -> "썸네일 저장"
                     else -> "영상 저장"
                 }
             )
