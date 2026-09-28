@@ -667,6 +667,48 @@ object InstagramWebCatalogEngine {
                   if (!response.ok) return;
                   const payload = await response.json();
                   walk(payload);
+
+                  const user = payload?.data?.user;
+                  const userId = user?.id;
+                  if (!userId) return;
+
+                  let maxId = null;
+                  const seenCursors = new Set();
+
+                  for (let page = 0; page < 300; page++) {
+                    let feedUrl =
+                      '/api/v1/feed/user/' +
+                      encodeURIComponent(String(userId)) +
+                      '/?count=12';
+
+                    if (maxId) {
+                      feedUrl += '&max_id=' + encodeURIComponent(String(maxId));
+                    }
+
+                    const feedResponse = await fetch(feedUrl, {
+                      credentials: 'include',
+                      headers: {
+                        'X-IG-App-ID': '936619743392459',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': '*/*'
+                      }
+                    });
+
+                    if (!feedResponse.ok) break;
+
+                    const feed = await feedResponse.json();
+                    walk(feed);
+
+                    if (!feed?.more_available) break;
+
+                    const next = feed?.next_max_id;
+                    if (!next || seenCursors.has(String(next))) break;
+
+                    seenCursors.add(String(next));
+                    maxId = next;
+
+                    await new Promise((resolve) => setTimeout(resolve, 650));
+                  }
                 } catch (_) {}
               }
 
