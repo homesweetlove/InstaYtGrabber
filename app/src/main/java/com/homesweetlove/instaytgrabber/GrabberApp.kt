@@ -5,7 +5,7 @@ import android.webkit.WebView
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramSession
-import com.yausername.youtubedl_android.FFmpeg
+import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 
 class GrabberApp : Application() {
