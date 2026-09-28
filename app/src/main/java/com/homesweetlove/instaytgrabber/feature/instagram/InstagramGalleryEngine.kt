@@ -13,6 +13,7 @@ object InstagramGalleryEngine {
     suspend fun download(
         url: String,
         type: InstagramMediaType,
+        cookieHeader: String? = null,
         onProgress: (GrabProgress) -> Unit = {}
     ): Result<File> = withContext(Dispatchers.IO) {
         runCatching {
@@ -29,7 +30,7 @@ object InstagramGalleryEngine {
                     "download",
                     url.trim(),
                     root.absolutePath,
-                    InstagramSession.cookie().orEmpty(),
+                    cookieHeader.orEmpty(),
                     type.folder
                 )
                 .toString()
