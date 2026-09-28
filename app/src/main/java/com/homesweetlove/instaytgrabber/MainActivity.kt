@@ -356,7 +356,11 @@ private fun YouTubeScreen(initialUrl: String) {
                     val result = runCatching {
                         YouTubeEngine.download(url, type) {
                             progress = (it.percent / 100f).coerceIn(0f, 1f)
-                            status = "처리 중 ${it.percent.toInt()}%"
+                            status = when {
+                                it.percent > 0f -> "처리 중 " + it.percent.toInt() + "%"
+                                it.line.isNotBlank() -> it.line
+                                else -> "YouTube 엔진 준비 중"
+                            }
                         }.getOrThrow()
                     }
                     status = result.fold(
