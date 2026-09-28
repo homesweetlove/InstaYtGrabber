@@ -20,18 +20,28 @@ def _cookies(header):
     return result
 
 
+def _username(url):
+    match = re.fullmatch(
+        r"https?://(?:www\.)?instagram\.com/([^/?#]+)/?(?:[?#].*)?",
+        (url or "").strip(),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        raise ValueError("Instagram 프로필 링크를 입력해 주세요.")
+    username = match.group(1)
+    if username.lower() in _RESERVED:
+        raise ValueError("게시물 링크가 아니라 프로필 링크를 입력해 주세요.")
+    return username
+
+
 def _normalize_url(url, kind):
     url = (url or "").strip()
     if kind == "story":
-        match = re.fullmatch(
-            r"https?://(?:www\.)?instagram\.com/([^/?#]+)/?",
-            url,
-            flags=re.IGNORECASE,
-        )
-        if match:
-            username = match.group(1)
-            if username.lower() not in _RESERVED:
-                return f"https://www.instagram.com/stories/{username}/"
+        try:
+            username = _username(url)
+            return f"https://www.instagram.com/stories/{username}/"
+        except ValueError:
+            pass
     return url
 
 
@@ -45,11 +55,203 @@ def _files(root):
     return sorted(items)
 
 
+def _settings(cookie_header="", max_posts=24):
+    settings = [
+        (("cache",), "file", ":memory:"),
+        (("extractor", "instagram"), "videos", True),
+        (("extractor", "instagram"), "previews", False),
+        (("extractor", "instagram"), "max-posts", int(max_posts)),
+        (("extractor", "instagram"), "sleep-request", "0.5-1.5"),
+        (("extractor", "instagram"), "user-cache", "memory"),
+    ]
+    cookie_map = _cookies(cookie_header)
+    if cookie_map:
+        settings.append((("extractor", "instagram"), "cookies", cookie_map))
+    return settings
+
+
+def _collect(url, cookie_header="", max_posts=24):
+    with config.apply(_settings(cookie_header, max_posts)):
+        task = job.DataJob(url, file=None, resolve=False)
+        task.run()
+    if task.exception:
+        raise task.exception
+    return task.data
+
+
+def _directory(data):
+    for msg in data:
+        if isinstance(msg, (list, tuple)) and len(msg) == 2 and isinstance(msg[1], dict):
+            return msg[1]
+    return {}
+
+
+def _urls(data):
+    result = []
+    for msg in data:
+        if not isinstance(msg, (list, tuple)) or len(msg) < 3:
+            continue
+        url = msg[1]
+        meta = msg[2]
+        if isinstance(url, str) and isinstance(meta, dict):
+            result.append((url, meta))
+    return result
+
+
+def _first_url(data):
+    items = _urls(data)
+    return items[0] if items else (None, {})
+
+
+def _profile_base(username):
+    return f"https://www.instagram.com/{username}"
+
+
+def _media_card(url, meta, fallback_kind):
+    media_id = str(meta.get("media_id") or meta.get("post_id") or meta.get("post_shortcode") or "")
+    post_url = meta.get("post_url") or url
+    kind = meta.get("type") or fallback_kind
+    preview = meta.get("display_url") or meta.get("thumbnail_url") or url
+    is_video = bool(meta.get("video_url")) or str(url).startswith("ytdl:")
+    title = (
+        meta.get("highlight_title")
+        or meta.get("description")
+        or meta.get("post_shortcode")
+        or media_id
+        or kind
+    )
+    return {
+        "id": media_id or post_url,
+        "kind": kind,
+        "title": str(title)[:140],
+        "target_url": post_url,
+        "preview_url": preview,
+        "is_video": is_video,
+        "date": str(meta.get("date") or meta.get("post_date") or ""),
+        "num": int(meta.get("num") or 1),
+    }
+
+
+def _group_cards(data, fallback_kind):
+    groups = {}
+    for url, meta in _urls(data):
+        card = _media_card(url, meta, fallback_kind)
+        key = (
+            meta.get("post_id")
+            or meta.get("post_shortcode")
+            or meta.get("highlight_title")
+            or card["target_url"]
+        )
+        key = str(key)
+        current = groups.get(key)
+        if current is None:
+            card["count"] = 1
+            groups[key] = card
+        else:
+            current["count"] += 1
+            if not current.get("preview_url") and card.get("preview_url"):
+                current["preview_url"] = card["preview_url"]
+    return list(groups.values())
+
+
+def profile_catalog(url, cookie_header="", max_posts=24, sections="all"):
+    username = _username(url)
+    base = _profile_base(username)
+    requested = {
+        "info", "avatar", "stories", "highlights", "posts", "reels"
+    } if sections == "all" else {
+        part.strip() for part in sections.split(",") if part.strip()
+    }
+
+    result = {
+        "ok": True,
+        "username": username,
+        "profile": {},
+        "avatar": None,
+        "stories": [],
+        "highlights": [],
+        "posts": [],
+        "reels": [],
+        "errors": {},
+    }
+
+    def run_section(name, target, mapper):
+        if name not in requested:
+            return
+        try:
+            data = _collect(target, cookie_header, max_posts)
+            mapper(data)
+        except Exception as exc:
+            result["errors"][name] = f"{type(exc).__name__}: {exc}"
+
+    run_section(
+        "info",
+        base + "/info/",
+        lambda data: result.update(profile=_directory(data)),
+    )
+
+    def map_avatar(data):
+        avatar_url, meta = _first_url(data)
+        if avatar_url:
+            result["avatar"] = {
+                "id": "avatar:" + username,
+                "kind": "avatar",
+                "title": "프로필 사진",
+                "target_url": base + "/avatar/",
+                "preview_url": meta.get("display_url") or avatar_url,
+                "is_video": False,
+                "date": "",
+                "count": 1,
+            }
+
+    run_section("avatar", base + "/avatar/", map_avatar)
+
+    def map_stories(data):
+        cards = []
+        seen = set()
+        for media_url, meta in _urls(data):
+            card = _media_card(media_url, meta, "story")
+            media_id = str(meta.get("media_id") or meta.get("post_id") or card["id"])
+            if media_id in seen:
+                continue
+            seen.add(media_id)
+            card["target_url"] = f"https://www.instagram.com/stories/{username}/{media_id}/"
+            card["count"] = 1
+            cards.append(card)
+        result["stories"] = cards
+
+    run_section(
+        "stories",
+        f"https://www.instagram.com/stories/{username}/",
+        map_stories,
+    )
+
+    run_section(
+        "highlights",
+        base + "/highlights/",
+        lambda data: result.update(highlights=_group_cards(data, "highlight")),
+    )
+    run_section(
+        "posts",
+        base + "/posts/",
+        lambda data: result.update(posts=_group_cards(data, "post")),
+    )
+    run_section(
+        "reels",
+        base + "/reels/",
+        lambda data: result.update(reels=_group_cards(data, "reel")),
+    )
+
+    if not result["profile"] and result["errors"].get("info"):
+        result["ok"] = False
+
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
 def download(url, output_dir, cookie_header="", kind="post"):
     os.makedirs(output_dir, exist_ok=True)
     target = _normalize_url(url, kind)
     before = set(_files(output_dir))
-    cookie_map = _cookies(cookie_header)
 
     include_map = {
         "story": "stories",
@@ -65,8 +267,10 @@ def download(url, output_dir, cookie_header="", kind="post"):
         (("extractor", "instagram"), "include", include_map.get(kind, "posts")),
         (("extractor", "instagram"), "videos", True),
         (("extractor", "instagram"), "previews", False),
-        (("extractor", "instagram"), "sleep-request", "6.0-12.0"),
+        (("extractor", "instagram"), "sleep-request", "0.5-1.5"),
+        (("extractor", "instagram"), "user-cache", "memory"),
     ]
+    cookie_map = _cookies(cookie_header)
     if cookie_map:
         settings.append((("extractor", "instagram"), "cookies", cookie_map))
 
