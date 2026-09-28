@@ -1,6 +1,5 @@
 package com.homesweetlove.instaytgrabber.core
 
-import android.os.Environment
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
@@ -30,10 +29,7 @@ object GrabberEngine {
             }
             onProgress(GrabProgress(percent = 0f, line = "yt-dlp " + engineVersion))
 
-            val root = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                "InstaYtGrabber/$folderName"
-            ).apply { mkdirs() }
+            val root = StoragePublisher.tempDirectory(folderName)
 
             val request = YoutubeDLRequest(url)
             request.addOption("--ignore-config")
@@ -81,7 +77,19 @@ object GrabberEngine {
             YoutubeDL.getInstance().execute(request) { progress, eta, line ->
                 onProgress(GrabProgress(progress, eta, line))
             }
-            root
+
+            val completed = root.walkTopDown()
+                .filter { file ->
+                    file.isFile &&
+                        file.length() > 0L &&
+                        file.extension.lowercase() !in setOf("part", "ytdl", "json")
+                }
+                .toList()
+
+            val published = StoragePublisher.publishFiles(completed, folderName)
+            root.deleteRecursively()
+            published.firstOrNull()
+                ?: error("다운로드된 파일을 저장하지 못했습니다.")
         }
     }
 }
