@@ -8,7 +8,8 @@ import java.io.File
 enum class InstagramMediaType(val label: String, val folder: String) {
     STORY("스토리", "story"),
     HIGHLIGHT("하이라이트", "highlight"),
-    POST("게시글 / 릴스", "post")
+    POST("게시글", "post"),
+    REEL("릴스", "reel")
 }
 
 enum class InstagramOutputType(val label: String, val folder: String) {
