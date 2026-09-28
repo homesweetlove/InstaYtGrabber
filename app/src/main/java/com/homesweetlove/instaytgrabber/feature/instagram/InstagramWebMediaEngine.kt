@@ -103,9 +103,7 @@ object InstagramWebMediaEngine {
             val root = activity.findViewById<ViewGroup>(android.R.id.content)
             val webView = makeWebView(activity)
             webView.alpha = 0.01f
-            webView.translationX = -1400f
-            webView.translationY = -2400f
-            root.addView(webView, FrameLayout.LayoutParams(1080, 2200))
+            root.addView(webView, 0, FrameLayout.LayoutParams(1080, 2200))
 
             var finished = false
             var routed = false
