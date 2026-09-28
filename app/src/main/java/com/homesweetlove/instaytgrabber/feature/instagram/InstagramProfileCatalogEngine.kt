@@ -23,65 +23,68 @@ data class InstagramProfileCatalog(
     val biography: String,
     val isPrivate: Boolean,
     val avatar: InstagramCatalogItem?,
-    val stories: List<InstagramCatalogItem>,
-    val highlights: List<InstagramCatalogItem>,
-    val posts: List<InstagramCatalogItem>,
-    val reels: List<InstagramCatalogItem>,
-    val errors: Map<String, String>
+    val stories: List<InstagramCatalogItem> = emptyList(),
+    val highlights: List<InstagramCatalogItem> = emptyList(),
+    val posts: List<InstagramCatalogItem> = emptyList(),
+    val reels: List<InstagramCatalogItem> = emptyList(),
+    val errors: Map<String, String> = emptyMap()
 )
 
+enum class InstagramCatalogSection(val wireName: String) {
+    STORIES("stories"),
+    HIGHLIGHTS("highlights"),
+    POSTS("posts"),
+    REELS("reels")
+}
+
 object InstagramProfileCatalogEngine {
-    suspend fun load(profileUrl: String): Result<InstagramProfileCatalog> =
+    suspend fun loadBase(profileUrl: String): Result<InstagramProfileCatalog> =
         withContext(Dispatchers.IO) {
             runCatching {
                 val anonymous = callCatalog(
                     profileUrl = profileUrl,
                     cookieHeader = "",
-                    sections = "all"
+                    sections = "info,avatar"
                 )
 
-                var merged = anonymous
-                val cookie = InstagramSession.cookie()
-
-                if (!cookie.isNullOrBlank()) {
-                    val needsProtected = anonymous.isPrivate &&
-                        (anonymous.errors.containsKey("stories") || anonymous.errors.containsKey("highlights"))
-                    if (needsProtected) {
-                        val protected = callCatalog(
+                if (anonymous.username.isNotBlank() && anonymous.errors["info"].isNullOrBlank()) {
+                    anonymous
+                } else {
+                    val cookie = InstagramSession.cookie()
+                    if (cookie.isNullOrBlank()) {
+                        anonymous
+                    } else {
+                        callCatalog(
                             profileUrl = profileUrl,
                             cookieHeader = cookie,
-                            sections = "stories,highlights"
-                        )
-                        merged = merged.copy(
-                            stories = protected.stories.ifEmpty { merged.stories },
-                            highlights = protected.highlights.ifEmpty { merged.highlights },
-                            errors = merged.errors + protected.errors
-                        )
-                    }
-
-                    val needsPrivateFeed =
-                        anonymous.isPrivate && anonymous.posts.isEmpty() && anonymous.reels.isEmpty()
-
-                    if (needsPrivateFeed) {
-                        val privateFeed = callCatalog(
-                            profileUrl = profileUrl,
-                            cookieHeader = cookie,
-                            sections = "info,avatar,posts,reels"
-                        )
-                        merged = merged.copy(
-                            fullName = privateFeed.fullName.ifBlank { merged.fullName },
-                            biography = privateFeed.biography.ifBlank { merged.biography },
-                            avatar = privateFeed.avatar ?: merged.avatar,
-                            posts = privateFeed.posts.ifEmpty { merged.posts },
-                            reels = privateFeed.reels.ifEmpty { merged.reels },
-                            errors = merged.errors + privateFeed.errors
+                            sections = "info,avatar"
                         )
                     }
                 }
-
-                merged
             }
         }
+
+    suspend fun loadSection(
+        profileUrl: String,
+        section: InstagramCatalogSection,
+        isPrivate: Boolean
+    ): Result<List<InstagramCatalogItem>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val cookie = if (isPrivate) InstagramSession.cookie().orEmpty() else ""
+            val catalog = callCatalog(
+                profileUrl = profileUrl,
+                cookieHeader = cookie,
+                sections = section.wireName
+            )
+
+            when (section) {
+                InstagramCatalogSection.STORIES -> catalog.stories
+                InstagramCatalogSection.HIGHLIGHTS -> catalog.highlights
+                InstagramCatalogSection.POSTS -> catalog.posts
+                InstagramCatalogSection.REELS -> catalog.reels
+            }
+        }
+    }
 
     private fun callCatalog(
         profileUrl: String,
@@ -100,15 +103,13 @@ object InstagramProfileCatalogEngine {
             .toString()
 
         val root = JSONObject(raw)
-        if (!root.optBoolean("ok", true) && root.optJSONObject("profile")?.length() == 0) {
-            val message = root.optJSONObject("errors")
-                ?.optString("info")
-                ?.takeIf { it.isNotBlank() }
-                ?: "프로필을 불러오지 못했습니다."
-            error(message)
+        val errors = parseErrors(root.optJSONObject("errors"))
+        val profile = root.optJSONObject("profile") ?: JSONObject()
+
+        if (sections.contains("info") && profile.length() == 0 && errors["info"].isNullOrBlank().not()) {
+            error(errors["info"] ?: "프로필을 불러오지 못했습니다.")
         }
 
-        val profile = root.optJSONObject("profile") ?: JSONObject()
         return InstagramProfileCatalog(
             username = root.optString("username"),
             fullName = profile.optString("full_name"),
@@ -119,7 +120,7 @@ object InstagramProfileCatalogEngine {
             highlights = parseItems(root.optJSONArray("highlights")),
             posts = parseItems(root.optJSONArray("posts")),
             reels = parseItems(root.optJSONArray("reels")),
-            errors = parseErrors(root.optJSONObject("errors"))
+            errors = errors
         )
     }
 
