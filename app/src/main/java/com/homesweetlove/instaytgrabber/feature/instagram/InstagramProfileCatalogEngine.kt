@@ -94,7 +94,7 @@ object InstagramProfileCatalogEngine {
                 "profile_catalog",
                 profileUrl.trim(),
                 cookieHeader,
-                24,
+                0,
                 sections
             )
             .toString()
