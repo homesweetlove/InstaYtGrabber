@@ -7,7 +7,8 @@ import java.io.File
 
 enum class YouTubeMediaType(val label: String, val folder: String) {
     VIDEO("영상", "video"),
-    AUDIO("MP3", "audio")
+    AUDIO("MP3", "audio"),
+    THUMBNAIL("썸네일", "thumbnail")
 }
 
 object YouTubeEngine {
@@ -27,9 +28,14 @@ object YouTubeEngine {
         onProgress: (GrabProgress) -> Unit
     ): Result<File> {
         require(accepts(url)) { "YouTube 링크를 입력해 주세요." }
+        val kind = when (type) {
+            YouTubeMediaType.VIDEO -> GrabKind.VIDEO
+            YouTubeMediaType.AUDIO -> GrabKind.AUDIO
+            YouTubeMediaType.THUMBNAIL -> GrabKind.THUMBNAIL
+        }
         return GrabberEngine.download(
             url = url.trim(),
-            kind = if (type == YouTubeMediaType.AUDIO) GrabKind.AUDIO else GrabKind.VIDEO,
+            kind = kind,
             folderName = "YouTube/${type.folder}",
             allowPlaylist = false,
             onProgress = onProgress
