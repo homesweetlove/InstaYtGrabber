@@ -56,7 +56,23 @@ object YouTubeEngine {
             onStatus("조회 실패 · yt-dlp 업데이트 후 재시도")
             YtDlpRuntime.refreshEngine(onStatus)
 
-            inspectWithFallbacks(url.trim()).getOrThrow()
+            val second = inspectWithFallbacks(url.trim())
+            if (second.isSuccess) {
+                return@runCatching second.getOrThrow()
+            }
+
+            onStatus("yt-dlp 조회 실패 · InnerTube 보조 조회 중")
+            val native = YouTubeNativeLookup.inspect(url.trim())
+            if (native.isSuccess) {
+                return@runCatching native.getOrThrow()
+            }
+
+            throw IllegalStateException(
+                "YouTube 링크 조회 실패 · yt-dlp: " +
+                    (second.exceptionOrNull()?.message ?: first.exceptionOrNull()?.message ?: "unknown") +
+                    " / InnerTube: " +
+                    (native.exceptionOrNull()?.message ?: "unknown")
+            )
         }
     }
 
