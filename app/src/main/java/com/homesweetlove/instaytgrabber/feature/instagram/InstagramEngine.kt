@@ -28,6 +28,7 @@ object InstagramEngine {
         url: String,
         type: InstagramMediaType,
         output: InstagramOutputType,
+        allowAuthenticatedFallback: Boolean = true,
         onProgress: (GrabProgress) -> Unit
     ): Result<File> {
         require(accepts(url)) { "Instagram 링크를 입력해 주세요." }
@@ -43,6 +44,10 @@ object InstagramEngine {
         )
 
         if (anonymousResult.isSuccess) {
+            return anonymousResult
+        }
+
+        if (!allowAuthenticatedFallback) {
             return anonymousResult
         }
 
