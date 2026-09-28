@@ -137,7 +137,7 @@ private fun InstagramScreen(initialUrl: String) {
     ) {
         Text("Instagram", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "스토리 · 하이라이트 · 게시글/릴스를 각각 선택합니다. 비로그인 상태에서는 공개 콘텐츠만 시도하고, 로그인 세션은 현재 계정이 원래 접근 가능한 콘텐츠에만 사용합니다.",
+            "공개 콘텐츠는 로그인 상태여도 항상 익명으로 먼저 처리합니다. 익명 접근이 실패한 경우에만 연결된 로그인 세션으로 재시도합니다.",
             style = MaterialTheme.typography.bodyMedium
         )
 
@@ -187,8 +187,8 @@ private fun InstagramScreen(initialUrl: String) {
         }
 
         Text(
-            if (loggedIn) "로그인됨 · 앱 히스토리 저장 안 함"
-            else "비로그인 · 공개 콘텐츠만"
+            if (loggedIn) "로그인됨 · 공개 콘텐츠는 익명 우선 · 히스토리 저장 안 함"
+            else "비로그인 · 공개 콘텐츠 익명 처리"
         )
 
         LinearProgressIndicator(
@@ -207,7 +207,11 @@ private fun InstagramScreen(initialUrl: String) {
                     val result = runCatching {
                         InstagramEngine.download(url, type, output) {
                             progress = (it.percent / 100f).coerceIn(0f, 1f)
-                            status = "처리 중 ${it.percent.toInt()}%"
+                            status = when (it.line) {
+                                "anonymous" -> "공개 콘텐츠 · 비로그인으로 확인 중"
+                                "authenticated" -> "익명 접근 실패 · 로그인 세션으로 재시도 중"
+                                else -> "처리 중 ${it.percent.toInt()}%"
+                            }
                         }.getOrThrow()
                     }
                     status = result.fold(
@@ -230,7 +234,7 @@ private fun InstagramScreen(initialUrl: String) {
         Text(status, style = MaterialTheme.typography.bodySmall)
         HorizontalDivider()
         Text(
-            "InstaYtGrabber는 최근 URL이나 다운로드 목록을 별도 DB에 저장하지 않습니다. 스토리 콘텐츠를 앱 안에서 재생하거나 미리보기하지 않고 다운로드 처리만 시도합니다. Instagram 서버의 조회 기록 동작 자체를 숨기거나 우회하지는 않습니다.",
+            "최근 URL이나 다운로드 목록은 저장하지 않습니다. 공개 콘텐츠 처리에는 Instagram 로그인 쿠키를 전송하지 않으며, 스토리도 앱 안에서 재생·미리보기하지 않습니다.",
             style = MaterialTheme.typography.bodySmall
         )
     }
