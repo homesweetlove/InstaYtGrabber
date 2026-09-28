@@ -643,6 +643,33 @@ object InstagramWebCatalogEngine {
                 } catch (_) {}
               }
 
+              async function warmProfileApi() {
+                try {
+                  const username =
+                    (window.location.pathname || '')
+                      .split('/')
+                      .filter(Boolean)[0] || '';
+                  if (!username) return;
+
+                  const response = await fetch(
+                    '/api/v1/users/web_profile_info/?username=' +
+                      encodeURIComponent(username),
+                    {
+                      credentials: 'include',
+                      headers: {
+                        'X-IG-App-ID': '936619743392459',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': '*/*'
+                      }
+                    }
+                  );
+
+                  if (!response.ok) return;
+                  const payload = await response.json();
+                  walk(payload);
+                } catch (_) {}
+              }
+
               function collectDom() {
                 document.querySelectorAll('a[href]').forEach((a) => {
                   const href = a.getAttribute('href') || '';
@@ -672,6 +699,12 @@ object InstagramWebCatalogEngine {
               async function run() {
                 try {
                   hookNetwork();
+                  await warmProfileApi();
+                  collectDom();
+
+                  if (found.size > 0) {
+                    IYGBridge.onProgress(found.size);
+                  }
 
                   for (let i = 0; i < 300; i++) {
                     collectDom();
