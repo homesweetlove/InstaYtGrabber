@@ -7,7 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class GrabKind { VIDEO, AUDIO, MEDIA }
+enum class GrabKind { VIDEO, AUDIO, MEDIA, THUMBNAIL }
 
 data class GrabProgress(
     val percent: Float = 0f,
@@ -45,11 +45,19 @@ object GrabberEngine {
                     request.addOption("--audio-format", "mp3")
                     request.addOption("--audio-quality", "0")
                 }
+
                 GrabKind.VIDEO -> {
                     request.addOption("-f", "bv*+ba/b")
                     request.addOption("--merge-output-format", "mp4")
                 }
+
                 GrabKind.MEDIA -> request.addOption("-f", "best")
+
+                GrabKind.THUMBNAIL -> {
+                    request.addOption("--skip-download")
+                    request.addOption("--write-thumbnail")
+                    request.addOption("--convert-thumbnails", "jpg")
+                }
             }
 
             val template = File(root, "%(title).180B [%(id)s].%(ext)s").absolutePath
