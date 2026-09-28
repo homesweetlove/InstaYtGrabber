@@ -30,11 +30,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramEngine
+import coil.compose.AsyncImage
 import com.homesweetlove.instaytgrabber.feature.youtube.YouTubeEngine
+import com.homesweetlove.instaytgrabber.feature.youtube.YouTubeMediaInfo
 import com.homesweetlove.instaytgrabber.feature.youtube.YouTubeMediaType
 import com.homesweetlove.instaytgrabber.ui.BottomCta
 import com.homesweetlove.instaytgrabber.ui.BrandMark
@@ -51,6 +54,7 @@ import com.homesweetlove.instaytgrabber.ui.TaskOverlay
 import com.homesweetlove.instaytgrabber.ui.TaskState
 import com.homesweetlove.instaytgrabber.ui.Toss
 import com.homesweetlove.instaytgrabber.ui.TossButton
+import com.homesweetlove.instaytgrabber.ui.TossButtonStyle
 import com.homesweetlove.instaytgrabber.ui.TossCard
 import com.homesweetlove.instaytgrabber.ui.TossTextField
 import com.homesweetlove.instaytgrabber.ui.TossType
@@ -194,6 +198,17 @@ private val YouTubeMediaType.runningTitle: String
         YouTubeMediaType.THUMBNAIL -> "썸네일을 저장하고 있어요"
     }
 
+private fun formatDuration(totalSeconds: Int): String {
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
+    }
+}
+
 @Composable
 private fun YouTubeMediaIcon(type: YouTubeMediaType) {
     when (type) {
@@ -208,6 +223,10 @@ private fun YouTubeScreen(initialUrl: String, header: @Composable () -> Unit) {
     var url by remember { mutableStateOf(initialUrl) }
     var type by remember { mutableStateOf(YouTubeMediaType.VIDEO) }
     var task by remember { mutableStateOf<TaskState>(TaskState.Idle) }
+    var info by remember { mutableStateOf<YouTubeMediaInfo?>(null) }
+    var inspecting by remember { mutableStateOf(false) }
+    var inspectStatus by remember { mutableStateOf("") }
+    var inspectError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val running = task is TaskState.Running
     val invalidUrl = url.isNotBlank() && !YouTubeEngine.accepts(url)
@@ -227,13 +246,88 @@ private fun YouTubeScreen(initialUrl: String, header: @Composable () -> Unit) {
                     SectionTitle("링크")
                     TossTextField(
                         value = url,
-                        onValueChange = { url = it },
+                        onValueChange = {
+                            url = it
+                            info = null
+                            inspectError = null
+                            inspectStatus = ""
+                        },
                         placeholder = "youtube.com 또는 youtu.be 링크",
                         enabled = !running,
                         isError = invalidUrl
                     )
                     if (invalidUrl) {
                         Text("YouTube 링크가 아닌 것 같아요", style = TossType.Caption, color = Toss.Red)
+                    }
+
+                    TossButton(
+                        text = if (inspecting) "영상 정보 확인 중…" else "링크 확인하기",
+                        enabled = url.isNotBlank() && !invalidUrl && !running && !inspecting,
+                        style = TossButtonStyle.Secondary,
+                        compact = true,
+                        onClick = {
+                            scope.launch {
+                                inspecting = true
+                                info = null
+                                inspectError = null
+                                inspectStatus = "YouTube 링크를 확인하고 있어요"
+
+                                val result = YouTubeEngine.inspect(url) { status ->
+                                    inspectStatus = status
+                                }
+
+                                result.fold(
+                                    onSuccess = {
+                                        info = it
+                                        inspectStatus = "조회 완료"
+                                    },
+                                    onFailure = {
+                                        inspectError = it.message ?: it.javaClass.simpleName
+                                        inspectStatus = ""
+                                    }
+                                )
+                                inspecting = false
+                            }
+                        }
+                    )
+
+                    if (inspectStatus.isNotBlank()) {
+                        Text(inspectStatus, style = TossType.Caption, color = Toss.Text3)
+                    }
+                    inspectError?.let {
+                        Text(it, style = TossType.Caption, color = Toss.Red)
+                    }
+                }
+
+                info?.let { media ->
+                    TossCard {
+                        if (media.thumbnailUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = media.thumbnailUrl,
+                                contentDescription = media.title,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(180.dp),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        Text(media.title, style = TossType.Section, color = Toss.Text1)
+                        Text(
+                            buildString {
+                                if (media.channel.isNotBlank()) append(media.channel)
+                                if (media.durationSeconds > 0) {
+                                    if (isNotEmpty()) append(" · ")
+                                    append(formatDuration(media.durationSeconds))
+                                }
+                                if (media.formatCount > 0) {
+                                    if (isNotEmpty()) append(" · ")
+                                    append(media.formatCount)
+                                    append(" formats")
+                                }
+                            },
+                            style = TossType.Caption,
+                            color = Toss.Text3
+                        )
                     }
                 }
 
@@ -264,7 +358,7 @@ private fun YouTubeScreen(initialUrl: String, header: @Composable () -> Unit) {
             TossButton(
                 text = type.actionLabel,
                 modifier = Modifier.weight(1f),
-                enabled = url.isNotBlank() && !invalidUrl && !running,
+                enabled = url.isNotBlank() && !invalidUrl && info != null && !running && !inspecting,
                 onClick = {
                     val target = type
                     scope.launch {
