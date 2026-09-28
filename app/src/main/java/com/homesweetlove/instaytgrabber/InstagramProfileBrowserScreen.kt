@@ -54,6 +54,7 @@ import com.homesweetlove.instaytgrabber.feature.instagram.InstagramCatalogItem
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramCatalogSection
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramDirectFileEngine
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramEngine
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramInstaloaderMediaEngine
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramMediaType
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramOutputType
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileCatalog
@@ -236,23 +237,51 @@ fun InstagramProfileBrowserScreen(
                     else -> InstagramMediaType.POST
                 }
 
-                val result = when (item.kind) {
-                    "avatar" -> InstagramDirectFileEngine.download(
+                val itemBaseName = (profile?.username ?: "instagram") + "_" +
+                    item.kind + "_" + (index + 1)
+
+                val result = when {
+                    item.kind == "avatar" -> InstagramDirectFileEngine.download(
                         url = item.targetUrl,
                         folderName = "profile/media",
                         baseName = "profile_" + (profile?.username ?: "instagram")
                     )
 
-                    "post", "reel" -> InstagramWebMediaEngine.download(
-                        context = context,
-                        pageUrl = item.targetUrl,
-                        folderName = item.kind + "/media",
-                        baseName = (profile?.username ?: "instagram") + "_" +
-                            item.kind + "_" + (index + 1),
-                        authenticated = profile?.isPrivate == true
-                    ) { progress ->
-                        task = TaskState.Running(title, step + " · " + progress.line, base)
-                    }
+                    item.kind == "story" &&
+                        item.targetUrl.startsWith("https://") &&
+                        !item.targetUrl.contains("instagram.com/stories/") ->
+                        InstagramDirectFileEngine.download(
+                            url = item.targetUrl,
+                            folderName = "story/media",
+                            baseName = itemBaseName
+                        )
+
+                    item.targetUrl.startsWith("instaloader://") ->
+                        InstagramInstaloaderMediaEngine.download(
+                            target = item.targetUrl,
+                            folderName = item.kind + "/media",
+                            baseName = itemBaseName,
+                            authenticated = profile?.isPrivate == true ||
+                                item.kind == "highlight"
+                        ) { progress ->
+                            task = TaskState.Running(
+                                title = title,
+                                detail = step + " · " + progress.line,
+                                progress = base + (progress.percent / 100f)
+                                    .coerceIn(0f, 1f) / chosen.size
+                            )
+                        }
+
+                    item.kind == "post" || item.kind == "reel" ->
+                        InstagramWebMediaEngine.download(
+                            context = context,
+                            pageUrl = item.targetUrl,
+                            folderName = item.kind + "/media",
+                            baseName = itemBaseName,
+                            authenticated = profile?.isPrivate == true
+                        ) { progress ->
+                            task = TaskState.Running(title, step + " · " + progress.line, base)
+                        }
 
                     else -> InstagramEngine.download(
                         url = item.targetUrl,
@@ -264,7 +293,8 @@ fun InstagramProfileBrowserScreen(
                             task = TaskState.Running(
                                 title = title,
                                 detail = step + " · " + progress.percent.toInt() + "%",
-                                progress = base + (progress.percent / 100f).coerceIn(0f, 1f) / chosen.size
+                                progress = base + (progress.percent / 100f)
+                                    .coerceIn(0f, 1f) / chosen.size
                             )
                         }
                     }
