@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import requests
 from gallery_dl import config, job
 
 _RESERVED = {
@@ -60,8 +61,13 @@ def _settings(cookie_header="", max_posts=0):
         (("cache",), "file", ":memory:"),
         (("extractor", "instagram"), "videos", True),
         (("extractor", "instagram"), "previews", False),
-        (("extractor", "instagram"), "sleep-request", "0.5-1.5"),
+        (("extractor", "instagram"), "sleep-request", "0.2-0.6"),
+        (("extractor", "instagram"), "sleep-429", 0),
+        (("extractor", "instagram"), "retries", 0),
+        (("extractor", "instagram"), "timeout", 8.0),
         (("extractor", "instagram"), "user-cache", "memory"),
+        (("downloader",), "retries", 1),
+        (("downloader",), "timeout", 15.0),
     ]
     if int(max_posts) > 0:
         settings.append((("extractor", "instagram"), "max-posts", int(max_posts)))
@@ -106,6 +112,54 @@ def _first_url(data):
 
 def _profile_base(username):
     return f"https://www.instagram.com/{username}"
+
+
+_PROFILE_HEADERS = {
+    "X-IG-App-ID": "936619743392459",
+    "X-ASBD-ID": "198387",
+    "X-Requested-With": "XMLHttpRequest",
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "User-Agent": (
+        "Mozilla/5.0 (Linux; Android 14; Mobile) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/140.0.0.0 Mobile Safari/537.36"
+    ),
+}
+
+
+def _direct_profile(username, cookie_header=""):
+    session = requests.Session()
+    session.headers.update(_PROFILE_HEADERS)
+    session.headers["Referer"] = f"https://www.instagram.com/{username}/"
+
+    for name, value in _cookies(cookie_header).items():
+        session.cookies.set(name, value, domain=".instagram.com")
+
+    endpoints = (
+        "https://www.instagram.com/api/v1/users/web_profile_info/",
+        "https://i.instagram.com/api/v1/users/web_profile_info/",
+    )
+
+    errors = []
+    for endpoint in endpoints:
+        try:
+            response = session.get(
+                endpoint,
+                params={"username": username},
+                timeout=(4, 8),
+                allow_redirects=False,
+            )
+            if response.status_code == 200:
+                payload = response.json()
+                user = (payload.get("data") or {}).get("user")
+                if user:
+                    return user
+            errors.append(f"{response.status_code}:{endpoint}")
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__}:{exc}")
+
+    raise RuntimeError("profile_api_failed " + " | ".join(errors))
 
 
 def _media_card(url, meta, fallback_kind):
@@ -185,11 +239,18 @@ def profile_catalog(url, cookie_header="", max_posts=0, sections="all"):
         except Exception as exc:
             result["errors"][name] = f"{type(exc).__name__}: {exc}"
 
-    run_section(
-        "info",
-        base + "/info/",
-        lambda data: result.update(profile=_directory(data)),
-    )
+    if "info" in requested:
+        try:
+            result["profile"] = _direct_profile(username, cookie_header)
+        except Exception as direct_exc:
+            try:
+                data = _collect(base + "/info/", cookie_header, max_posts)
+                result["profile"] = _directory(data)
+            except Exception as fallback_exc:
+                result["errors"]["info"] = (
+                    f"direct={type(direct_exc).__name__}: {direct_exc}; "
+                    f"gallery={type(fallback_exc).__name__}: {fallback_exc}"
+                )
 
     if "avatar" in requested and result["profile"]:
         profile = result["profile"]
