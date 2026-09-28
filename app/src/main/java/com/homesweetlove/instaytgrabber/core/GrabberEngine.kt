@@ -32,6 +32,16 @@ object GrabberEngine {
             val root = StoragePublisher.tempDirectory(folderName)
 
             val request = YoutubeDLRequest(url)
+            val host = runCatching {
+                java.net.URI(url).host.orEmpty().lowercase()
+            }.getOrDefault("")
+            val isYouTube =
+                host == "youtu.be" ||
+                    host == "youtube.com" ||
+                    host.endsWith(".youtube.com") ||
+                    host == "youtube-nocookie.com" ||
+                    host.endsWith(".youtube-nocookie.com")
+
             request.addOption("--ignore-config")
             request.addOption("--no-cache-dir")
             request.addOption("--newline")
@@ -42,6 +52,16 @@ object GrabberEngine {
             request.addOption("--extractor-retries", "2")
             request.addOption("--fragment-retries", "2")
             request.addOption("--remote-components", "ejs:github")
+            if (isYouTube) {
+                request.addOption(
+                    "--extractor-args",
+                    "youtube:player_client=android,web,web_safari,mweb,ios"
+                )
+                request.addOption(
+                    "--compat-options",
+                    "no-youtube-unavailable-videos"
+                )
+            }
             if (!allowPlaylist) request.addOption("--no-playlist")
             cookieHeader?.takeIf { it.isNotBlank() }?.let {
                 request.addOption("--add-header", "Cookie:$it")
