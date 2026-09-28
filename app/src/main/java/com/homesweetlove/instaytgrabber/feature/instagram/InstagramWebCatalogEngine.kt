@@ -16,17 +16,21 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
+import org.json.JSONObject
 import java.net.URI
 import kotlin.coroutines.resume
 
 object InstagramWebCatalogEngine {
+    private const val BASE_TIMEOUT_MS = 25_000L
+    private const val GRID_TIMEOUT_MS = 150_000L
+
     suspend fun loadBase(
         context: Context,
         profileUrl: String,
         authenticated: Boolean
     ): Result<InstagramProfileCatalog> = withContext(Dispatchers.Main) {
         runCatching {
-            withTimeout(20_000) {
+            withTimeout(BASE_TIMEOUT_MS) {
                 loadBaseInternal(context, profileUrl, authenticated)
             }
         }
@@ -40,7 +44,7 @@ object InstagramWebCatalogEngine {
         onProgress: (Int) -> Unit = {}
     ): Result<List<InstagramCatalogItem>> = withContext(Dispatchers.Main) {
         runCatching {
-            withTimeout(150_000) {
+            withTimeout(GRID_TIMEOUT_MS) {
                 loadGridInternal(
                     context = context,
                     profileUrl = profileUrl,
@@ -69,11 +73,10 @@ object InstagramWebCatalogEngine {
 
             val root = activity.findViewById<ViewGroup>(android.R.id.content)
             val webView = makeWebView(activity)
-            webView.alpha = 0.01f
-            webView.translationX = -1200f
-            root.addView(webView, FrameLayout.LayoutParams(1080, 2200))
+            attachHidden(root, webView)
 
             var finished = false
+            var routed = false
 
             fun cleanup() {
                 runCatching { root.removeView(webView) }
@@ -84,25 +87,35 @@ object InstagramWebCatalogEngine {
                 }
             }
 
+            fun fail(message: String) {
+                if (finished) return
+                finished = true
+                cleanup()
+                if (cont.isActive) {
+                    cont.resumeWith(Result.failure(IllegalStateException(message)))
+                }
+            }
+
             class Bridge {
                 @JavascriptInterface
                 fun onBase(payload: String) {
                     webView.post {
                         if (finished) return@post
-                        finished = true
+
                         runCatching {
-                            val obj = org.json.JSONObject(payload)
-                            val pagePath = obj.optString("path")
-                            if (pagePath.trimEnd('/').lowercase() != ("/" + username).lowercase()) {
-                                error("Instagram이 프로필 대신 " + pagePath + " 페이지를 열었습니다.")
+                            val obj = JSONObject(payload)
+                            val path = obj.optString("path")
+                            val expected = "/" + username
+
+                            if (path.trimEnd('/').lowercase() != expected.lowercase()) {
+                                error("Instagram 웹이 프로필 대신 " + path + " 페이지를 열었습니다.")
+                            }
+
+                            if (obj.optBoolean("loginWall", false)) {
+                                error("Instagram이 비로그인 요청에 로그인 화면을 표시했습니다.")
                             }
 
                             val avatarUrl = obj.optString("avatar")
-                            val pageTitle = obj.optString("title")
-                            if (pageTitle.isBlank() && avatarUrl.isBlank()) {
-                                error("Instagram 프로필 메타데이터를 읽지 못했습니다.")
-                            }
-
                             val avatar = avatarUrl.takeIf { it.startsWith("http") }?.let {
                                 InstagramCatalogItem(
                                     id = "avatar:" + username,
@@ -116,24 +129,33 @@ object InstagramWebCatalogEngine {
                                 )
                             }
 
+                            val displayName = obj.optString("displayName")
+                                .ifBlank {
+                                    obj.optString("title")
+                                        .substringBefore("(@")
+                                        .substringBefore(" •")
+                                        .trim()
+                                }
+
+                            if (displayName.isBlank() && avatar == null) {
+                                error("Instagram 프로필 DOM을 읽지 못했습니다.")
+                            }
+
                             InstagramProfileCatalog(
                                 username = username,
-                                fullName = pageTitle
-                                    .substringBefore("(@")
-                                    .substringBefore(" •")
-                                    .trim(),
+                                fullName = displayName,
                                 biography = obj.optString("description"),
                                 isPrivate = obj.optBoolean("private", false),
                                 avatar = avatar
                             )
                         }.fold(
                             onSuccess = { catalog ->
+                                finished = true
                                 cleanup()
                                 if (cont.isActive) cont.resume(catalog)
                             },
                             onFailure = { error ->
-                                cleanup()
-                                if (cont.isActive) cont.resumeWith(Result.failure(error))
+                                fail(error.message ?: error.javaClass.simpleName)
                             }
                         )
                     }
@@ -141,44 +163,72 @@ object InstagramWebCatalogEngine {
 
                 @JavascriptInterface
                 fun onError(message: String) {
-                    webView.post {
-                        if (finished) return@post
-                        finished = true
-                        cleanup()
-                        if (cont.isActive) {
-                            cont.resumeWith(Result.failure(IllegalStateException(message)))
-                        }
-                    }
+                    webView.post { fail(message) }
                 }
             }
 
             webView.addJavascriptInterface(Bridge(), "IYGBridge")
             webView.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
-                    if (finished) return
+                    if (finished || routed) return
+                    routed = true
+
                     view.evaluateJavascript(
                         """
                         (() => {
                           try {
-                            const text = (document.body?.innerText || '').toLowerCase();
-                            const title =
-                              document.querySelector('meta[property="og:title"]')?.content ||
-                              document.title || '';
-                            const description =
-                              document.querySelector('meta[property="og:description"]')?.content ||
-                              document.querySelector('meta[name="description"]')?.content || '';
-                            const avatar =
-                              document.querySelector('meta[property="og:image"]')?.content || '';
-                            const isPrivate =
-                              text.includes('this account is private') ||
-                              text.includes('계정은 비공개') ||
-                              text.includes('비공개 계정');
-                            IYGBridge.onBase(JSON.stringify({
-                              title: title,
-                              description: description,
-                              avatar: avatar,
-                              private: isPrivate
-                            }));
+                            history.pushState({}, '', '/$username/');
+                            window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
+
+                            setTimeout(() => {
+                              try {
+                                const bodyText = document.body?.innerText || '';
+                                const lower = bodyText.toLowerCase();
+                                const path = window.location.pathname || '';
+
+                                const loginWall =
+                                  path.startsWith('/accounts/login') ||
+                                  lower.includes('log in to see photos and videos') ||
+                                  lower.includes('instagram에 로그인');
+
+                                const isPrivate =
+                                  lower.includes('this account is private') ||
+                                  lower.includes('계정은 비공개') ||
+                                  lower.includes('비공개 계정');
+
+                                const title =
+                                  document.querySelector('meta[property="og:title"]')?.content ||
+                                  document.title || '';
+
+                                const description =
+                                  document.querySelector('meta[property="og:description"]')?.content ||
+                                  document.querySelector('meta[name="description"]')?.content || '';
+
+                                const header = document.querySelector('header');
+                                const avatar =
+                                  header?.querySelector('img[src]')?.currentSrc ||
+                                  header?.querySelector('img[src]')?.src ||
+                                  document.querySelector('meta[property="og:image"]')?.content ||
+                                  '';
+
+                                const displayName =
+                                  header?.querySelector('h1')?.innerText ||
+                                  header?.querySelector('h2')?.innerText ||
+                                  '';
+
+                                IYGBridge.onBase(JSON.stringify({
+                                  path,
+                                  title,
+                                  description,
+                                  avatar,
+                                  displayName,
+                                  private: isPrivate,
+                                  loginWall
+                                }));
+                              } catch (inner) {
+                                IYGBridge.onError(String(inner));
+                              }
+                            }, 3500);
                           } catch (e) {
                             IYGBridge.onError(String(e));
                           }
@@ -193,24 +243,17 @@ object InstagramWebCatalogEngine {
                     request: WebResourceRequest,
                     error: WebResourceError
                 ) {
-                    if (request.isForMainFrame && !finished) {
-                        finished = true
-                        cleanup()
-                        if (cont.isActive) {
-                            cont.resumeWith(
-                                Result.failure(
-                                    IllegalStateException(
-                                        "Instagram 웹 로드 실패: " + error.description
-                                    )
-                                )
-                            )
-                        }
+                    if (request.isForMainFrame) {
+                        fail("Instagram 웹 로드 실패: " + error.description)
                     }
                 }
             }
 
-            cont.invokeOnCancellation { cleanup() }
-            webView.loadUrl("https://www.instagram.com/" + username + "/")
+            cont.invokeOnCancellation {
+                webView.post { cleanup() }
+            }
+
+            webView.loadUrl("https://www.instagram.com/")
         }
     }
 
@@ -233,11 +276,10 @@ object InstagramWebCatalogEngine {
 
             val root = activity.findViewById<ViewGroup>(android.R.id.content)
             val webView = makeWebView(activity)
-            webView.alpha = 0.01f
-            webView.translationX = -1200f
-            root.addView(webView, FrameLayout.LayoutParams(1080, 2200))
+            attachHidden(root, webView)
 
             var finished = false
+            var routed = false
 
             fun cleanup() {
                 runCatching { root.removeView(webView) }
@@ -245,6 +287,15 @@ object InstagramWebCatalogEngine {
                     webView.stopLoading()
                     webView.removeJavascriptInterface("IYGBridge")
                     webView.destroy()
+                }
+            }
+
+            fun fail(message: String) {
+                if (finished) return
+                finished = true
+                cleanup()
+                if (cont.isActive) {
+                    cont.resumeWith(Result.failure(IllegalStateException(message)))
                 }
             }
 
@@ -260,15 +311,32 @@ object InstagramWebCatalogEngine {
                 fun onGrid(payload: String) {
                     webView.post {
                         if (finished) return@post
-                        finished = true
+
                         runCatching {
-                            val array = JSONArray(payload)
+                            val rootObj = JSONObject(payload)
+                            val path = rootObj.optString("path")
+                            val loginWall = rootObj.optBoolean("loginWall", false)
+                            val expected = if (reelsOnly) {
+                                "/" + username + "/reels"
+                            } else {
+                                "/" + username
+                            }
+
+                            if (path.trimEnd('/').lowercase() != expected.lowercase()) {
+                                error("Instagram 웹이 " + path + " 페이지에 머물렀습니다.")
+                            }
+                            if (loginWall) {
+                                error("Instagram이 비로그인 요청에 로그인 화면을 표시했습니다.")
+                            }
+
+                            val array = rootObj.optJSONArray("items") ?: JSONArray()
                             buildList {
                                 for (i in 0 until array.length()) {
                                     val obj = array.optJSONObject(i) ?: continue
                                     val href = obj.optString("href")
                                     val preview = obj.optString("preview")
                                     val kind = if (href.contains("/reel/")) "reel" else "post"
+
                                     if (reelsOnly && kind != "reel") continue
                                     if (!reelsOnly && kind != "post") continue
 
@@ -290,12 +358,12 @@ object InstagramWebCatalogEngine {
                             }
                         }.fold(
                             onSuccess = { items ->
+                                finished = true
                                 cleanup()
                                 if (cont.isActive) cont.resume(items)
                             },
                             onFailure = { error ->
-                                cleanup()
-                                if (cont.isActive) cont.resumeWith(Result.failure(error))
+                                fail(error.message ?: error.javaClass.simpleName)
                             }
                         )
                     }
@@ -303,20 +371,41 @@ object InstagramWebCatalogEngine {
 
                 @JavascriptInterface
                 fun onError(message: String) {
-                    if (finished) return
-                    finished = true
-                    cleanup()
-                    if (cont.isActive) {
-                        cont.resumeWith(Result.failure(IllegalStateException(message)))
-                    }
+                    webView.post { fail(message) }
                 }
             }
 
             webView.addJavascriptInterface(Bridge(), "IYGBridge")
             webView.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
-                    if (finished) return
-                    view.evaluateJavascript(gridScript(reelsOnly), null)
+                    if (finished || routed) return
+                    routed = true
+
+                    val route = if (reelsOnly) {
+                        "/" + username + "/reels/"
+                    } else {
+                        "/" + username + "/"
+                    }
+
+                    val script =
+                        """
+                        (() => {
+                          try {
+                            history.pushState({}, '', '$route');
+                            window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
+
+                            setTimeout(() => {
+                        """.trimIndent() +
+                        gridCollectorScript(reelsOnly) +
+                        """
+                            }, 3500);
+                          } catch (e) {
+                            IYGBridge.onError(String(e));
+                          }
+                        })();
+                        """.trimIndent()
+
+                    view.evaluateJavascript(script, null)
                 }
 
                 override fun onReceivedError(
@@ -324,30 +413,17 @@ object InstagramWebCatalogEngine {
                     request: WebResourceRequest,
                     error: WebResourceError
                 ) {
-                    if (request.isForMainFrame && !finished) {
-                        finished = true
-                        cleanup()
-                        if (cont.isActive) {
-                            cont.resumeWith(
-                                Result.failure(
-                                    IllegalStateException(
-                                        "Instagram 웹 로드 실패: " + error.description
-                                    )
-                                )
-                            )
-                        }
+                    if (request.isForMainFrame) {
+                        fail("Instagram 웹 로드 실패: " + error.description)
                     }
                 }
             }
 
-            cont.invokeOnCancellation { cleanup() }
-
-            val target = if (reelsOnly) {
-                "https://www.instagram.com/" + username + "/reels/"
-            } else {
-                "https://www.instagram.com/" + username + "/"
+            cont.invokeOnCancellation {
+                webView.post { cleanup() }
             }
-            webView.loadUrl(target)
+
+            webView.loadUrl("https://www.instagram.com/")
         }
     }
 
@@ -366,6 +442,13 @@ object InstagramWebCatalogEngine {
             isFocusable = false
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
         }
+
+    private fun attachHidden(root: ViewGroup, webView: WebView) {
+        webView.alpha = 0.01f
+        webView.translationX = -1400f
+        webView.translationY = -2400f
+        root.addView(webView, FrameLayout.LayoutParams(1080, 2200))
+    }
 
     private suspend fun prepareCookies(authenticated: Boolean) {
         val manager = CookieManager.getInstance()
@@ -405,7 +488,7 @@ object InstagramWebCatalogEngine {
         return username
     }
 
-    private fun gridScript(reelsOnly: Boolean): String {
+    private fun gridCollectorScript(reelsOnly: Boolean): String {
         val wanted = if (reelsOnly) "/reel/" else "/p/"
 
         return """
@@ -430,10 +513,18 @@ object InstagramWebCatalogEngine {
 
                   found.set(clean, {
                     href: clean,
-                    preview: preview,
-                    title: title
+                    preview,
+                    title
                   });
                 });
+              }
+
+              function isLoginWall() {
+                const path = window.location.pathname || '';
+                const text = (document.body?.innerText || '').toLowerCase();
+                return path.startsWith('/accounts/login') ||
+                  text.includes('log in to see photos and videos') ||
+                  text.includes('instagram에 로그인');
               }
 
               async function run() {
@@ -449,14 +540,19 @@ object InstagramWebCatalogEngine {
                       stable++;
                     }
 
-                    if (stable >= 5) break;
+                    if (stable >= 12) break;
 
                     window.scrollTo(0, document.documentElement.scrollHeight);
                     await new Promise((resolve) => setTimeout(resolve, 500));
                   }
 
                   collect();
-                  IYGBridge.onGrid(JSON.stringify(Array.from(found.values())));
+
+                  IYGBridge.onGrid(JSON.stringify({
+                    path: window.location.pathname || '',
+                    loginWall: isLoginWall(),
+                    items: Array.from(found.values())
+                  }));
                 } catch (e) {
                   IYGBridge.onError(String(e));
                 }
