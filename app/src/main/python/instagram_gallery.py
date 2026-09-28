@@ -198,6 +198,106 @@ def _profile_from_feed(username, cookie_header=""):
     raise RuntimeError("feed_profile_missing_user")
 
 
+def _best_image(item):
+    candidates = ((item.get("image_versions2") or {}).get("candidates") or [])
+    if candidates:
+        best = max(
+            candidates,
+            key=lambda x: int(x.get("width") or 0) * int(x.get("height") or 0),
+        )
+        return best.get("url") or ""
+    return item.get("thumbnail_url") or ""
+
+
+def _direct_feed_cards(username, cookie_header=""):
+    session = requests.Session()
+    session.headers.update(_PROFILE_HEADERS)
+    session.headers["Referer"] = f"https://www.instagram.com/{username}/"
+
+    for name, value in _cookies(cookie_header).items():
+        session.cookies.set(name, value, domain=".instagram.com")
+
+    endpoint = f"https://www.instagram.com/api/v1/feed/user/{username}/username/"
+    cards = []
+    max_id = None
+    seen_cursors = set()
+
+    while True:
+        params = {"count": 33}
+        if max_id:
+            params["max_id"] = max_id
+
+        response = session.get(
+            endpoint,
+            params=params,
+            timeout=(4, 10),
+            allow_redirects=False,
+        )
+
+        if response.status_code != 200:
+            raise RuntimeError(f"feed_http_{response.status_code}")
+
+        content_type = response.headers.get("content-type", "")
+        if "json" not in content_type.lower():
+            raise RuntimeError("feed_non_json")
+
+        payload = response.json()
+        items = payload.get("items") or []
+
+        for item in items:
+            code = str(item.get("code") or "")
+            if not code:
+                continue
+
+            product_type = str(item.get("product_type") or "").lower()
+            kind = "reel" if product_type in {"clips", "reel"} else "post"
+            carousel = item.get("carousel_media") or []
+            count = len(carousel) if carousel else 1
+
+            first_media = carousel[0] if carousel else item
+            preview = _best_image(first_media) or _best_image(item)
+
+            is_video = bool(item.get("video_versions"))
+            if carousel and not is_video:
+                is_video = any(bool(child.get("video_versions")) for child in carousel)
+
+            caption = item.get("caption")
+            if isinstance(caption, dict):
+                title = str(caption.get("text") or "")
+            else:
+                title = ""
+
+            target = (
+                f"https://www.instagram.com/reel/{code}/"
+                if kind == "reel"
+                else f"https://www.instagram.com/p/{code}/"
+            )
+
+            cards.append({
+                "id": str(item.get("pk") or item.get("id") or code),
+                "kind": kind,
+                "title": (title or code)[:140],
+                "target_url": target,
+                "preview_url": preview,
+                "is_video": is_video,
+                "date": str(item.get("taken_at") or ""),
+                "count": count,
+            })
+
+        if not payload.get("more_available"):
+            break
+
+        next_max_id = payload.get("next_max_id")
+        if not next_max_id or next_max_id in seen_cursors:
+            break
+
+        seen_cursors.add(next_max_id)
+        max_id = next_max_id
+
+    return cards
+
+
+
 def _media_card(url, meta, fallback_kind):
     media_id = str(meta.get("media_id") or meta.get("post_id") or meta.get("post_shortcode") or "")
     post_url = meta.get("post_url") or url
@@ -347,16 +447,29 @@ def profile_catalog(url, cookie_header="", max_posts=0, sections="all"):
         base + "/highlights/",
         lambda data: result.update(highlights=_group_cards(data, "highlight")),
     )
-    run_section(
-        "posts",
-        base + "/posts/",
-        lambda data: result.update(posts=_group_cards(data, "post")),
-    )
-    run_section(
-        "reels",
-        base + "/reels/",
-        lambda data: result.update(reels=_group_cards(data, "reel")),
-    )
+    if "posts" in requested or "reels" in requested:
+        feed_cards = None
+        try:
+            feed_cards = _direct_feed_cards(username, cookie_header)
+        except Exception as feed_exc:
+            result["errors"]["feed"] = f"{type(feed_exc).__name__}: {feed_exc}"
+
+        if feed_cards is not None:
+            if "posts" in requested:
+                result["posts"] = [card for card in feed_cards if card["kind"] == "post"]
+            if "reels" in requested:
+                result["reels"] = [card for card in feed_cards if card["kind"] == "reel"]
+        else:
+            run_section(
+                "posts",
+                base + "/posts/",
+                lambda data: result.update(posts=_group_cards(data, "post")),
+            )
+            run_section(
+                "reels",
+                base + "/reels/",
+                lambda data: result.update(reels=_group_cards(data, "reel")),
+            )
 
     if not result["profile"] and result["errors"].get("info"):
         result["ok"] = False
