@@ -50,7 +50,7 @@ Downloads/InstaYtGrabber/
 - YouTube 및 음원 처리: `youtubedl-android 0.18.1` + yt-dlp + FFmpeg
 - Instagram 사진/영상 원본: `gallery-dl 1.32.14`
 - Embedded Python: `Chaquopy 17.0.0` / Python 3.11
-- UI: Kotlin + Jetpack Compose
+- UI: Kotlin + Jetpack Compose (토스·애플 톤 라이트 테마, `ui/` 디자인 시스템)
 
 Instagram/YouTube 쪽 웹 구조가 변경되면 추출기가 일시적으로 동작하지 않을 수 있습니다. 이 경우 bundled extractor 버전을 업데이트해야 합니다.
 
