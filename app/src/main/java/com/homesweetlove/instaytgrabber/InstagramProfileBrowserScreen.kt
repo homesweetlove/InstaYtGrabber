@@ -44,6 +44,7 @@ import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramCatalogItem
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramCatalogSection
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramDirectFileEngine
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramEngine
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramMediaType
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramOutputType
@@ -355,15 +356,23 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
                                 else -> InstagramMediaType.POST
                             }
 
-                            val result = InstagramEngine.download(
-                                url = item.targetUrl,
-                                type = type,
-                                output = InstagramOutputType.MEDIA,
-                                allowAuthenticatedFallback = profile?.isPrivate == true
-                            ) { progress ->
-                                if (progress.percent > 0f) {
-                                    status = (index + 1).toString() + "/" + chosen.size +
-                                        " · " + progress.percent.toInt() + "%"
+                            val result = if (item.kind == "avatar") {
+                                InstagramDirectFileEngine.download(
+                                    url = item.targetUrl,
+                                    folderName = "profile/media",
+                                    baseName = "profile_" + (profile?.username ?: "instagram")
+                                )
+                            } else {
+                                InstagramEngine.download(
+                                    url = item.targetUrl,
+                                    type = type,
+                                    output = InstagramOutputType.MEDIA,
+                                    allowAuthenticatedFallback = profile?.isPrivate == true
+                                ) { progress ->
+                                    if (progress.percent > 0f) {
+                                        status = (index + 1).toString() + "/" + chosen.size +
+                                            " · " + progress.percent.toInt() + "%"
+                                    }
                                 }
                             }
 
