@@ -381,24 +381,15 @@ object InstagramWebCatalogEngine {
                     if (finished || routed) return
                     routed = true
 
-                    val route = if (reelsOnly) {
-                        "/" + username + "/reels/"
-                    } else {
-                        "/" + username + "/"
-                    }
-
                     val script =
                         """
                         (() => {
                           try {
-                            history.pushState({}, '', '$route');
-                            window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
-
                             setTimeout(() => {
                         """.trimIndent() +
                         gridCollectorScript(reelsOnly) +
                         """
-                            }, 3500);
+                            }, 2500);
                           } catch (e) {
                             IYGBridge.onError(String(e));
                           }
@@ -423,7 +414,12 @@ object InstagramWebCatalogEngine {
                 webView.post { cleanup() }
             }
 
-            webView.loadUrl("https://www.instagram.com/")
+            val target = if (reelsOnly) {
+                "https://www.instagram.com/" + username + "/reels/"
+            } else {
+                "https://www.instagram.com/" + username + "/"
+            }
+            webView.loadUrl(target)
         }
     }
 
