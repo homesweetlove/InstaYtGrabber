@@ -4,6 +4,7 @@ import android.app.Application
 import android.webkit.WebView
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
+import com.homesweetlove.instaytgrabber.core.StoragePublisher
 import com.homesweetlove.instaytgrabber.core.YtDlpRuntime
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramSession
 
@@ -18,6 +19,7 @@ class GrabberApp : Application() {
             Python.start(AndroidPlatform(this))
         }
 
+        StoragePublisher.attach(this)
         YtDlpRuntime.attach(this)
     }
 }
