@@ -36,11 +36,14 @@ object GrabberEngine {
             ).apply { mkdirs() }
 
             val request = YoutubeDLRequest(url)
+            request.addOption("--ignore-config")
+            request.addOption("--no-cache-dir")
             request.addOption("--newline")
             request.addOption("--no-mtime")
             request.addOption("--restrict-filenames")
-            request.addOption("--socket-timeout", "15")
+            request.addOption("--socket-timeout", "20")
             request.addOption("--retries", "2")
+            request.addOption("--extractor-retries", "2")
             request.addOption("--fragment-retries", "2")
             request.addOption("--remote-components", "ejs:github")
             if (!allowPlaylist) request.addOption("--no-playlist")
@@ -50,6 +53,7 @@ object GrabberEngine {
 
             when (kind) {
                 GrabKind.AUDIO -> {
+                    request.addOption("-f", "bestaudio/best")
                     request.addOption("-x")
                     request.addOption("--audio-format", "mp3")
                     request.addOption("--audio-quality", "0")
@@ -57,7 +61,9 @@ object GrabberEngine {
 
                 GrabKind.VIDEO -> {
                     request.addOption("-f", "bv*+ba/b")
+                    request.addOption("-S", "vcodec:h264,acodec:aac")
                     request.addOption("--merge-output-format", "mp4")
+                    request.addOption("--recode-video", "mp4")
                 }
 
                 GrabKind.MEDIA -> request.addOption("-f", "best")
