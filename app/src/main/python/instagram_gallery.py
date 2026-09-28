@@ -191,21 +191,27 @@ def profile_catalog(url, cookie_header="", max_posts=0, sections="all"):
         lambda data: result.update(profile=_directory(data)),
     )
 
-    def map_avatar(data):
-        avatar_url, meta = _first_url(data)
+    if "avatar" in requested and result["profile"]:
+        profile = result["profile"]
+        avatar_url = profile.get("profile_pic_url_hd") or profile.get("profile_pic_url")
+        if not avatar_url:
+            info = profile.get("hd_profile_pic_url_info") or {}
+            avatar_url = info.get("url") if isinstance(info, dict) else None
+        if not avatar_url:
+            versions = profile.get("hd_profile_pic_versions") or []
+            if versions and isinstance(versions[-1], dict):
+                avatar_url = versions[-1].get("url")
         if avatar_url:
             result["avatar"] = {
                 "id": "avatar:" + username,
                 "kind": "avatar",
                 "title": "프로필 사진",
-                "target_url": base + "/avatar/",
-                "preview_url": meta.get("display_url") or avatar_url,
+                "target_url": avatar_url,
+                "preview_url": avatar_url,
                 "is_video": False,
                 "date": "",
                 "count": 1,
             }
-
-    run_section("avatar", base + "/avatar/", map_avatar)
 
     def map_stories(data):
         cards = []
