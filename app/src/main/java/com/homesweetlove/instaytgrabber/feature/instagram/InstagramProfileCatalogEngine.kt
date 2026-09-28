@@ -125,100 +125,164 @@ object InstagramProfileCatalogEngine {
         onProgress: (Int) -> Unit = {}
     ): Result<List<InstagramCatalogItem>> {
         val sessionCookie = InstagramSession.cookie().orEmpty()
-        val requiresSession =
+        val sessionPreferred =
             section == InstagramCatalogSection.STORIES ||
                 section == InstagramCatalogSection.HIGHLIGHTS ||
                 isPrivate
 
-        val firstCookie = if (requiresSession) sessionCookie else ""
+        val attempts = mutableListOf<String>()
+        var sawEmptySuccess = false
 
-        val instaloader = withContext(Dispatchers.IO) {
-            runCatching {
-                callInstaloaderSection(
-                    profileUrl = profileUrl,
-                    section = section,
-                    cookieHeader = firstCookie
-                )
-            }
-        }
-        if (instaloader.isSuccess) {
-            val items = instaloader.getOrThrow()
-            onProgress(items.size)
-            return instaloader
-        }
-
-        if (!requiresSession && sessionCookie.isNotBlank()) {
-            val authenticatedInstaloader = withContext(Dispatchers.IO) {
+        suspend fun tryInstaloader(cookie: String, label: String): List<InstagramCatalogItem>? {
+            val result = withContext(Dispatchers.IO) {
                 runCatching {
                     callInstaloaderSection(
                         profileUrl = profileUrl,
                         section = section,
-                        cookieHeader = sessionCookie
+                        cookieHeader = cookie
                     )
                 }
             }
-            if (authenticatedInstaloader.isSuccess) {
-                val items = authenticatedInstaloader.getOrThrow()
-                onProgress(items.size)
-                return authenticatedInstaloader
+
+            result.onFailure {
+                attempts += label + ": " + (it.message ?: it.javaClass.simpleName)
+            }
+
+            if (result.isSuccess) {
+                val items = result.getOrThrow()
+                if (items.isNotEmpty()) {
+                    onProgress(items.size)
+                    return items
+                }
+                sawEmptySuccess = true
+                attempts += label + ": 0개"
+            }
+            return null
+        }
+
+        suspend fun tryGallery(cookie: String, label: String): List<InstagramCatalogItem>? {
+            val result = loadSectionViaGallery(
+                profileUrl = profileUrl,
+                section = section,
+                cookieHeader = cookie
+            )
+
+            result.onFailure {
+                attempts += label + ": " + (it.message ?: it.javaClass.simpleName)
+            }
+
+            if (result.isSuccess) {
+                val items = result.getOrThrow()
+                if (items.isNotEmpty()) {
+                    onProgress(items.size)
+                    return items
+                }
+                sawEmptySuccess = true
+                attempts += label + ": 0개"
+            }
+            return null
+        }
+
+        if (sessionPreferred && sessionCookie.isNotBlank()) {
+            tryInstaloader(sessionCookie, "로그인 Instaloader")?.let {
+                return Result.success(it)
+            }
+        } else {
+            tryInstaloader("", "익명 Instaloader")?.let {
+                return Result.success(it)
+            }
+
+            if (sessionCookie.isNotBlank()) {
+                tryInstaloader(sessionCookie, "로그인 Instaloader")?.let {
+                    return Result.success(it)
+                }
             }
         }
 
         if (section == InstagramCatalogSection.POSTS ||
             section == InstagramCatalogSection.REELS
         ) {
-            val browser = InstagramWebCatalogEngine.loadGrid(
+            val anonymousBrowser = InstagramWebCatalogEngine.loadGrid(
                 context = context,
                 profileUrl = profileUrl,
                 reelsOnly = section == InstagramCatalogSection.REELS,
-                authenticated = requiresSession && sessionCookie.isNotBlank(),
+                authenticated = false,
                 onProgress = onProgress
             )
 
-            if (browser.isSuccess && browser.getOrNull().orEmpty().isNotEmpty()) {
-                return browser
+            if (anonymousBrowser.isSuccess) {
+                val items = anonymousBrowser.getOrThrow()
+                if (items.isNotEmpty()) return Result.success(items)
+                sawEmptySuccess = true
+                attempts += "익명 Web: 0개"
+            } else {
+                attempts += "익명 Web: " +
+                    (anonymousBrowser.exceptionOrNull()?.message ?: "unknown")
             }
 
-            val gallery = loadSectionViaGallery(
-                profileUrl = profileUrl,
-                section = section,
-                cookieHeader = if (requiresSession) sessionCookie else ""
-            )
-            if (gallery.isSuccess) return gallery
-
-            if (!requiresSession && sessionCookie.isNotBlank()) {
-                val authenticatedGallery = loadSectionViaGallery(
+            if (sessionCookie.isNotBlank()) {
+                val authenticatedBrowser = InstagramWebCatalogEngine.loadGrid(
+                    context = context,
                     profileUrl = profileUrl,
-                    section = section,
-                    cookieHeader = sessionCookie
+                    reelsOnly = section == InstagramCatalogSection.REELS,
+                    authenticated = true,
+                    onProgress = onProgress
                 )
-                if (authenticatedGallery.isSuccess) return authenticatedGallery
+
+                if (authenticatedBrowser.isSuccess) {
+                    val items = authenticatedBrowser.getOrThrow()
+                    if (items.isNotEmpty()) return Result.success(items)
+                    sawEmptySuccess = true
+                    attempts += "로그인 Web: 0개"
+                } else {
+                    attempts += "로그인 Web: " +
+                        (authenticatedBrowser.exceptionOrNull()?.message ?: "unknown")
+                }
             }
 
-            if (browser.isSuccess) return browser
+            tryGallery("", "익명 gallery-dl")?.let {
+                return Result.success(it)
+            }
 
+            if (sessionCookie.isNotBlank()) {
+                tryGallery(sessionCookie, "로그인 gallery-dl")?.let {
+                    return Result.success(it)
+                }
+            }
+        } else {
+            tryGallery(
+                if (sessionCookie.isNotBlank()) sessionCookie else "",
+                if (sessionCookie.isNotBlank()) "로그인 gallery-dl" else "익명 gallery-dl"
+            )?.let {
+                return Result.success(it)
+            }
+        }
+
+        if ((section == InstagramCatalogSection.STORIES ||
+                section == InstagramCatalogSection.HIGHLIGHTS) &&
+            sessionCookie.isBlank()
+        ) {
             return Result.failure(
                 IllegalStateException(
-                    section.wireName + " 불러오기 실패. " +
-                        "Instaloader: " + (instaloader.exceptionOrNull()?.message ?: "unknown") +
-                        " / Web: " + (browser.exceptionOrNull()?.message ?: "unknown") +
-                        " / gallery-dl: " + (gallery.exceptionOrNull()?.message ?: "unknown")
+                    section.wireName +
+                        " 조회에는 Instagram 로그인이 필요합니다. 앱에서 Instagram 로그인을 먼저 연결해 주세요."
                 )
             )
         }
 
-        val gallery = loadSectionViaGallery(
-            profileUrl = profileUrl,
-            section = section,
-            cookieHeader = sessionCookie
-        )
-        if (gallery.isSuccess) return gallery
+        if (sawEmptySuccess) {
+            return Result.failure(
+                IllegalStateException(
+                    section.wireName +
+                        " 조회 결과가 비어 있습니다. Instagram이 목록 요청을 제한했거나 현재 표시할 항목이 없습니다. " +
+                        attempts.joinToString(" / ")
+                )
+            )
+        }
 
         return Result.failure(
             IllegalStateException(
-                section.wireName + " 불러오기 실패. " +
-                    "Instaloader: " + (instaloader.exceptionOrNull()?.message ?: "unknown") +
-                    " / gallery-dl: " + (gallery.exceptionOrNull()?.message ?: "unknown")
+                section.wireName + " 불러오기 실패. " + attempts.joinToString(" / ")
             )
         )
     }
