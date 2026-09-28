@@ -1,6 +1,6 @@
 package com.homesweetlove.instaytgrabber.feature.instagram
 
-import android.os.Environment
+import com.homesweetlove.instaytgrabber.core.StoragePublisher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -18,8 +18,8 @@ object InstagramDirectFileEngine {
 
             val connection = URL(url).openConnection() as HttpURLConnection
             connection.instanceFollowRedirects = true
-            connection.connectTimeout = 8_000
-            connection.readTimeout = 20_000
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 30_000
             connection.setRequestProperty(
                 "User-Agent",
                 "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/140.0.0.0 Mobile Safari/537.36"
@@ -42,21 +42,24 @@ object InstagramDirectFileEngine {
                     ?: "bin"
             }
 
-            val root = File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                "InstaYtGrabber/Instagram/$folderName"
-            ).apply { mkdirs() }
-
+            val tempDir = StoragePublisher.tempDirectory(folderName)
             val safeName = baseName.replace(Regex("[^A-Za-z0-9._-]"), "_")
-            val output = File(root, "$safeName.$extension")
+            val tempFile = File(tempDir, safeName + "." + extension)
 
             connection.inputStream.use { input ->
-                output.outputStream().use { stream ->
-                    input.copyTo(stream)
+                tempFile.outputStream().use { stream ->
+                    input.copyTo(stream, 64 * 1024)
                 }
             }
             connection.disconnect()
-            output
+
+            val published = StoragePublisher.publishFiles(
+                files = listOf(tempFile),
+                relativeFolder = folderName
+            ).first()
+
+            tempDir.deleteRecursively()
+            published
         }
     }
 }
