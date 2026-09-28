@@ -65,6 +65,12 @@ def _loader(cookie_header=""):
         # Instaloader only needs a truthy username to switch to its authenticated
         # query path. The actual identity is carried by the Instagram cookies.
         loader.load_session("webview-session", cookies)
+        ds_user_id = cookies.get("ds_user_id")
+        if ds_user_id:
+            try:
+                loader.context.user_id = int(ds_user_id)
+            except (TypeError, ValueError):
+                loader.context.user_id = ds_user_id
     return loader
 
 
