@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -81,6 +82,7 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
     var loginDialog by remember { mutableStateOf(false) }
     var loggedIn by remember { mutableStateOf(InstagramSession.isLoggedIn()) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     fun sectionItems(target: InstagramSection): List<InstagramCatalogItem> =
         when (target) {
@@ -103,9 +105,13 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
             status = target.label + " 전체 불러오는 중…"
 
             InstagramProfileCatalogEngine.loadSection(
+                context = context,
                 profileUrl = url,
                 section = target.catalogSection,
-                isPrivate = current.isPrivate
+                isPrivate = current.isPrivate,
+                onProgress = { count ->
+                    status = target.label + " " + count + "개 찾는 중…"
+                }
             ).fold(
                 onSuccess = { items ->
                     when (target) {
@@ -141,7 +147,7 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
             section = InstagramSection.STORY
             status = "프로필 정보 불러오는 중…"
 
-            InstagramProfileCatalogEngine.loadBase(url).fold(
+            InstagramProfileCatalogEngine.loadBase(context, url).fold(
                 onSuccess = { loaded ->
                     profile = loaded
                     status = "@" + loaded.username + " 프로필 불러옴"
