@@ -88,6 +88,10 @@ private fun InstaYtGrabberApp(sharedUrl: String) {
                 Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp)) {
                     Text("InstaYtGrabber", style = MaterialTheme.typography.headlineMedium)
                     Text("광고 없이 필요한 것만.", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "v" + BuildConfig.VERSION_NAME + " · WEB-RUNTIME",
+                        style = MaterialTheme.typography.labelSmall
+                    )
                 }
 
                 TabRow(selectedTabIndex = tab.ordinal) {
