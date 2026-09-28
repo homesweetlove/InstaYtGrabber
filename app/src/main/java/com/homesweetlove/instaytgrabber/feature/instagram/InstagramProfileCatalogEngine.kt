@@ -1,5 +1,6 @@
 package com.homesweetlove.instaytgrabber.feature.instagram
 
+import android.content.Context
 import com.chaquo.python.Python
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -38,22 +39,39 @@ enum class InstagramCatalogSection(val wireName: String) {
 }
 
 object InstagramProfileCatalogEngine {
-    suspend fun loadBase(profileUrl: String): Result<InstagramProfileCatalog> =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                val anonymous = runCatching {
-                    callCatalog(
-                        profileUrl = profileUrl,
-                        cookieHeader = "",
-                        sections = "info,avatar"
-                    )
-                }
+    suspend fun loadBase(
+        context: Context,
+        profileUrl: String
+    ): Result<InstagramProfileCatalog> {
+        val browserAnonymous = InstagramWebCatalogEngine.loadBase(
+            context = context,
+            profileUrl = profileUrl,
+            authenticated = false
+        )
+        if (browserAnonymous.isSuccess) return browserAnonymous
 
-                anonymous.getOrElse { anonymousError ->
-                    val cookie = InstagramSession.cookie()
-                    if (cookie.isNullOrBlank()) {
-                        throw anonymousError
-                    }
+        val pythonAnonymous = withContext(Dispatchers.IO) {
+            runCatching {
+                callCatalog(
+                    profileUrl = profileUrl,
+                    cookieHeader = "",
+                    sections = "info,avatar"
+                )
+            }
+        }
+        if (pythonAnonymous.isSuccess) return pythonAnonymous
+
+        val cookie = InstagramSession.cookie()
+        if (!cookie.isNullOrBlank()) {
+            val browserAuthenticated = InstagramWebCatalogEngine.loadBase(
+                context = context,
+                profileUrl = profileUrl,
+                authenticated = true
+            )
+            if (browserAuthenticated.isSuccess) return browserAuthenticated
+
+            return withContext(Dispatchers.IO) {
+                runCatching {
                     callCatalog(
                         profileUrl = profileUrl,
                         cookieHeader = cookie,
@@ -63,7 +81,65 @@ object InstagramProfileCatalogEngine {
             }
         }
 
+        return Result.failure(
+            IllegalStateException(
+                "Instagram 프로필을 불러오지 못했습니다. 브라우저: " +
+                    browserAnonymous.exceptionOrNull()?.message +
+                    " / API: " +
+                    pythonAnonymous.exceptionOrNull()?.message
+            )
+        )
+    }
+
     suspend fun loadSection(
+        context: Context,
+        profileUrl: String,
+        section: InstagramCatalogSection,
+        isPrivate: Boolean,
+        onProgress: (Int) -> Unit = {}
+    ): Result<List<InstagramCatalogItem>> {
+        if (section == InstagramCatalogSection.POSTS ||
+            section == InstagramCatalogSection.REELS
+        ) {
+            val browser = InstagramWebCatalogEngine.loadGrid(
+                context = context,
+                profileUrl = profileUrl,
+                reelsOnly = section == InstagramCatalogSection.REELS,
+                authenticated = isPrivate,
+                onProgress = onProgress
+            )
+
+            if (browser.isSuccess && browser.getOrNull().orEmpty().isNotEmpty()) {
+                return browser
+            }
+
+            val fallback = loadSectionViaPython(
+                profileUrl = profileUrl,
+                section = section,
+                isPrivate = isPrivate
+            )
+
+            if (fallback.isSuccess) return fallback
+            if (browser.isSuccess) return browser
+
+            return Result.failure(
+                IllegalStateException(
+                    section.wireName + " 불러오기 실패. 브라우저: " +
+                        browser.exceptionOrNull()?.message +
+                        " / API: " +
+                        fallback.exceptionOrNull()?.message
+                )
+            )
+        }
+
+        return loadSectionViaPython(
+            profileUrl = profileUrl,
+            section = section,
+            isPrivate = isPrivate
+        )
+    }
+
+    private suspend fun loadSectionViaPython(
         profileUrl: String,
         section: InstagramCatalogSection,
         isPrivate: Boolean
@@ -105,7 +181,10 @@ object InstagramProfileCatalogEngine {
         val errors = parseErrors(root.optJSONObject("errors"))
         val profile = root.optJSONObject("profile") ?: JSONObject()
 
-        if (sections.contains("info") && profile.length() == 0 && errors["info"].isNullOrBlank().not()) {
+        if (sections.contains("info") &&
+            profile.length() == 0 &&
+            errors["info"].isNullOrBlank().not()
+        ) {
             error(errors["info"] ?: "프로필을 불러오지 못했습니다.")
         }
 
