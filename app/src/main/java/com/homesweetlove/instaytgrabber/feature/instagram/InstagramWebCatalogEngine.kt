@@ -495,7 +495,155 @@ object InstagramWebCatalogEngine {
               let stable = 0;
               let previous = 0;
 
-              function collect() {
+              function bestPreview(obj) {
+                try {
+                  const direct =
+                    obj?.display_url ||
+                    obj?.thumbnail_src ||
+                    obj?.thumbnail_url ||
+                    obj?.image_url ||
+                    obj?.cover_url;
+                  if (direct) return direct;
+
+                  const candidates = obj?.image_versions2?.candidates;
+                  if (Array.isArray(candidates) && candidates.length) {
+                    const sorted = candidates.slice().sort((a, b) =>
+                      ((b.width || 0) * (b.height || 0)) -
+                      ((a.width || 0) * (a.height || 0))
+                    );
+                    return sorted[0]?.url || '';
+                  }
+
+                  const resources = obj?.display_resources;
+                  if (Array.isArray(resources) && resources.length) {
+                    return resources[resources.length - 1]?.src || '';
+                  }
+                } catch (_) {}
+                return '';
+              }
+
+              function captionOf(obj) {
+                try {
+                  if (typeof obj?.caption?.text === 'string') {
+                    return obj.caption.text;
+                  }
+                  const edges = obj?.edge_media_to_caption?.edges;
+                  if (Array.isArray(edges) && edges.length) {
+                    return edges[0]?.node?.text || '';
+                  }
+                  return obj?.accessibility_caption || '';
+                } catch (_) {
+                  return '';
+                }
+              }
+
+              function maybeAddMedia(obj) {
+                if (!obj || typeof obj !== 'object') return;
+
+                const code = obj.code || obj.shortcode;
+                if (typeof code !== 'string' || code.length < 5 || code.length > 64) {
+                  return;
+                }
+
+                const product = String(
+                  obj.product_type ||
+                  obj.media_product_type ||
+                  obj.productType ||
+                  ''
+                ).toLowerCase();
+
+                const typename = String(obj.__typename || '').toLowerCase();
+                const reelLike =
+                  product.includes('clip') ||
+                  product.includes('reel') ||
+                  Boolean(obj.clips_metadata) ||
+                  Boolean(obj.clips_tab_pinned_user_ids) ||
+                  typename.includes('clips');
+
+                const kind = reelLike ? 'reel' : 'post';
+                if (reelsOnly && kind !== 'reel') return;
+                if (!reelsOnly && kind !== 'post') return;
+
+                const href = '/' + kind + '/' + code + '/';
+                const preview = bestPreview(obj);
+                const title = captionOf(obj);
+
+                found.set(href, {
+                  href,
+                  preview,
+                  title
+                });
+              }
+
+              function walk(value, depth = 0) {
+                if (depth > 12 || value == null) return;
+                if (Array.isArray(value)) {
+                  value.forEach((item) => walk(item, depth + 1));
+                  return;
+                }
+                if (typeof value !== 'object') return;
+
+                maybeAddMedia(value);
+
+                try {
+                  Object.values(value).forEach((item) => {
+                    if (item && (typeof item === 'object')) {
+                      walk(item, depth + 1);
+                    }
+                  });
+                } catch (_) {}
+              }
+
+              function consumeText(text) {
+                if (!text || typeof text !== 'string') return;
+                const trimmed = text.trim();
+                if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) return;
+                try {
+                  walk(JSON.parse(trimmed));
+                } catch (_) {}
+              }
+
+              function hookNetwork() {
+                if (window.__IYG_NETWORK_HOOKED__) return;
+                window.__IYG_NETWORK_HOOKED__ = true;
+
+                try {
+                  const originalFetch = window.fetch;
+                  window.fetch = async function(...args) {
+                    const response = await originalFetch.apply(this, args);
+                    try {
+                      const clone = response.clone();
+                      clone.text().then(consumeText).catch(() => {});
+                    } catch (_) {}
+                    return response;
+                  };
+                } catch (_) {}
+
+                try {
+                  const originalOpen = XMLHttpRequest.prototype.open;
+                  const originalSend = XMLHttpRequest.prototype.send;
+
+                  XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+                    this.__iygUrl = String(url || '');
+                    return originalOpen.call(this, method, url, ...rest);
+                  };
+
+                  XMLHttpRequest.prototype.send = function(...args) {
+                    try {
+                      this.addEventListener('load', function() {
+                        try {
+                          if (typeof this.responseText === 'string') {
+                            consumeText(this.responseText);
+                          }
+                        } catch (_) {}
+                      });
+                    } catch (_) {}
+                    return originalSend.apply(this, args);
+                  };
+                } catch (_) {}
+              }
+
+              function collectDom() {
                 document.querySelectorAll('a[href]').forEach((a) => {
                   const href = a.getAttribute('href') || '';
                   if (!href.includes(wanted)) return;
@@ -523,8 +671,10 @@ object InstagramWebCatalogEngine {
 
               async function run() {
                 try {
-                  for (let i = 0; i < 240; i++) {
-                    collect();
+                  hookNetwork();
+
+                  for (let i = 0; i < 300; i++) {
+                    collectDom();
 
                     if (found.size !== previous) {
                       previous = found.size;
@@ -534,13 +684,13 @@ object InstagramWebCatalogEngine {
                       stable++;
                     }
 
-                    if (stable >= 12) break;
+                    if (stable >= 16) break;
 
                     window.scrollTo(0, document.documentElement.scrollHeight);
-                    await new Promise((resolve) => setTimeout(resolve, 500));
+                    await new Promise((resolve) => setTimeout(resolve, 550));
                   }
 
-                  collect();
+                  collectDom();
 
                   IYGBridge.onGrid(JSON.stringify({
                     path: window.location.pathname || '',
@@ -556,4 +706,5 @@ object InstagramWebCatalogEngine {
             })();
         """.trimIndent()
     }
+
 }
