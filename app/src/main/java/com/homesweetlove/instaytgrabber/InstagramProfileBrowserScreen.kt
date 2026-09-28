@@ -283,7 +283,8 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
                             val result = InstagramEngine.download(
                                 url = item.targetUrl,
                                 type = type,
-                                output = InstagramOutputType.MEDIA
+                                output = InstagramOutputType.MEDIA,
+                                allowAuthenticatedFallback = catalog?.isPrivate == true
                             ) { progress ->
                                 if (progress.percent > 0f) {
                                     status = (index + 1).toString() + "/" + chosen.size +
