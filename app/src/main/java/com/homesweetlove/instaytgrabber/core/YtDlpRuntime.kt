@@ -9,10 +9,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 object YtDlpRuntime {
-    private const val PREFS = "yt_dlp_runtime"
-    private const val LAST_UPDATE = "last_update"
-    private const val UPDATE_INTERVAL_MS = 12L * 60L * 60L * 1000L
-
     private lateinit var appContext: Context
     private val mutex = Mutex()
 
@@ -56,50 +52,53 @@ object YtDlpRuntime {
                 } catch (error: Throwable) {
                     initError = error
                     throw IllegalStateException(
-                        "yt-dlp 초기화 실패: " + (error.message ?: error.javaClass.simpleName),
+                        "yt-dlp 초기화 실패: " +
+                            (error.message ?: error.javaClass.simpleName),
                         error
                     )
-                }
-            }
-
-            val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            val now = System.currentTimeMillis()
-            val lastUpdate = prefs.getLong(LAST_UPDATE, 0L)
-
-            if (now - lastUpdate >= UPDATE_INTERVAL_MS) {
-                onStatus("yt-dlp nightly 업데이트 중")
-                val nightly = runCatching {
-                    YoutubeDL.getInstance().updateYoutubeDL(
-                        appContext,
-                        YoutubeDL.UpdateChannel.NIGHTLY
-                    )
-                }
-
-                if (nightly.isSuccess) {
-                    updateError = null
-                    prefs.edit().putLong(LAST_UPDATE, now).apply()
-                } else {
-                    onStatus("nightly 실패 · stable 업데이트 중")
-                    val stable = runCatching {
-                        YoutubeDL.getInstance().updateYoutubeDL(
-                            appContext,
-                            YoutubeDL.UpdateChannel.STABLE
-                        )
-                    }
-
-                    if (stable.isSuccess) {
-                        updateError = null
-                        prefs.edit().putLong(LAST_UPDATE, now).apply()
-                    } else {
-                        updateError = stable.exceptionOrNull() ?: nightly.exceptionOrNull()
-                        onStatus("업데이트 실패 · 번들 yt-dlp로 계속")
-                    }
                 }
             }
 
             YoutubeDL.getInstance().versionName(appContext)
                 ?: YoutubeDL.getInstance().version(appContext)
                 ?: "bundled"
+        }
+    }
+
+    suspend fun refreshEngine(
+        onStatus: (String) -> Unit = {}
+    ): Result<String> = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            runCatching {
+                if (!initialized) {
+                    YoutubeDL.getInstance().init(appContext)
+                    FFmpeg.getInstance().init(appContext)
+                    initialized = true
+                }
+
+                onStatus("yt-dlp stable 업데이트 확인 중")
+                val stable = runCatching {
+                    YoutubeDL.getInstance().updateYoutubeDL(
+                        appContext,
+                        YoutubeDL.UpdateChannel.STABLE
+                    )
+                }
+
+                if (stable.isFailure) {
+                    onStatus("stable 실패 · nightly 확인 중")
+                    YoutubeDL.getInstance().updateYoutubeDL(
+                        appContext,
+                        YoutubeDL.UpdateChannel.NIGHTLY
+                    )
+                }
+
+                updateError = null
+                YoutubeDL.getInstance().versionName(appContext)
+                    ?: YoutubeDL.getInstance().version(appContext)
+                    ?: "bundled"
+            }.onFailure {
+                updateError = it
+            }
         }
     }
 
