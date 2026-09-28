@@ -162,6 +162,42 @@ def _direct_profile(username, cookie_header=""):
     raise RuntimeError("profile_api_failed " + " | ".join(errors))
 
 
+def _profile_from_feed(username, cookie_header=""):
+    session = requests.Session()
+    session.headers.update(_PROFILE_HEADERS)
+    session.headers["Referer"] = f"https://www.instagram.com/{username}/"
+
+    for name, value in _cookies(cookie_header).items():
+        session.cookies.set(name, value, domain=".instagram.com")
+
+    url = f"https://www.instagram.com/api/v1/feed/user/{username}/username/"
+    response = session.get(
+        url,
+        params={"count": 1},
+        timeout=(4, 8),
+        allow_redirects=False,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"feed_profile_http_{response.status_code}")
+
+    content_type = response.headers.get("content-type", "")
+    if "json" not in content_type.lower():
+        raise RuntimeError("feed_profile_non_json")
+
+    payload = response.json()
+    user = payload.get("user")
+    if isinstance(user, dict) and user:
+        return user
+
+    items = payload.get("items") or []
+    if items:
+        owner = items[0].get("user") or {}
+        if isinstance(owner, dict) and owner:
+            return owner
+
+    raise RuntimeError("feed_profile_missing_user")
+
+
 def _media_card(url, meta, fallback_kind):
     media_id = str(meta.get("media_id") or meta.get("post_id") or meta.get("post_shortcode") or "")
     post_url = meta.get("post_url") or url
@@ -240,15 +276,27 @@ def profile_catalog(url, cookie_header="", max_posts=0, sections="all"):
             result["errors"][name] = f"{type(exc).__name__}: {exc}"
 
     if "info" in requested:
+        direct_exc = None
+        feed_exc = None
         try:
             result["profile"] = _direct_profile(username, cookie_header)
-        except Exception as direct_exc:
+        except Exception as exc:
+            direct_exc = exc
+
+        if not result["profile"]:
+            try:
+                result["profile"] = _profile_from_feed(username, cookie_header)
+            except Exception as exc:
+                feed_exc = exc
+
+        if not result["profile"]:
             try:
                 data = _collect(base + "/info/", cookie_header, max_posts)
                 result["profile"] = _directory(data)
             except Exception as fallback_exc:
                 result["errors"]["info"] = (
-                    f"direct={type(direct_exc).__name__}: {direct_exc}; "
+                    f"direct={type(direct_exc).__name__ if direct_exc else 'none'}: {direct_exc}; "
+                    f"feed={type(feed_exc).__name__ if feed_exc else 'none'}: {feed_exc}; "
                     f"gallery={type(fallback_exc).__name__}: {fallback_exc}"
                 )
 
