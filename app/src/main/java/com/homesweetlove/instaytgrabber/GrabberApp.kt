@@ -4,9 +4,8 @@ import android.app.Application
 import android.webkit.WebView
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
+import com.homesweetlove.instaytgrabber.core.YtDlpRuntime
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramSession
-import com.yausername.ffmpeg.FFmpeg
-import com.yausername.youtubedl_android.YoutubeDL
 
 class GrabberApp : Application() {
     override fun onCreate() {
@@ -19,7 +18,6 @@ class GrabberApp : Application() {
             Python.start(AndroidPlatform(this))
         }
 
-        runCatching { YoutubeDL.getInstance().init(this) }
-        runCatching { FFmpeg.getInstance().init(this) }
+        YtDlpRuntime.attach(this)
     }
 }
