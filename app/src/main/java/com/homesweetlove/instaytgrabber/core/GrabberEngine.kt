@@ -63,8 +63,8 @@ object GrabberEngine {
             val template = File(root, "%(title).180B [%(id)s].%(ext)s").absolutePath
             request.addOption("-o", template)
 
-            YoutubeDL.getInstance().execute(request) { progress, eta ->
-                onProgress(GrabProgress(progress, eta, ""))
+            YoutubeDL.getInstance().execute(request) { progress, eta, line ->
+                onProgress(GrabProgress(progress, eta, line))
             }
             root
         }
