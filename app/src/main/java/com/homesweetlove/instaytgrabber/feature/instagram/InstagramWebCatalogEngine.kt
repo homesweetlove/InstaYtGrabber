@@ -445,9 +445,7 @@ object InstagramWebCatalogEngine {
 
     private fun attachHidden(root: ViewGroup, webView: WebView) {
         webView.alpha = 0.01f
-        webView.translationX = -1400f
-        webView.translationY = -2400f
-        root.addView(webView, FrameLayout.LayoutParams(1080, 2200))
+        root.addView(webView, 0, FrameLayout.LayoutParams(1080, 2200))
     }
 
     private suspend fun prepareCookies(authenticated: Boolean) {
