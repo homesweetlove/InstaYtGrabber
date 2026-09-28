@@ -104,7 +104,7 @@ private fun InstaYtGrabberApp(sharedUrl: String) {
                 }
 
                 when (tab) {
-                    PlatformTab.INSTAGRAM -> InstagramScreen(
+                    PlatformTab.INSTAGRAM -> InstagramProfileBrowserScreen(
                         initialUrl = sharedUrl.takeIf(InstagramEngine::accepts).orEmpty()
                     )
                     PlatformTab.YOUTUBE -> YouTubeScreen(
