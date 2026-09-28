@@ -66,6 +66,47 @@ object InstagramProfileCatalogEngine {
         }
         if (gallery.isSuccess) return gallery
 
+        val sessionCookie = InstagramSession.cookie().orEmpty()
+        if (sessionCookie.isNotBlank()) {
+            val authenticatedInstaloader = withContext(Dispatchers.IO) {
+                runCatching { callInstaloaderBase(profileUrl, sessionCookie) }
+            }
+            if (authenticatedInstaloader.isSuccess) return authenticatedInstaloader
+
+            val authenticatedBrowser = InstagramWebCatalogEngine.loadBase(
+                context = context,
+                profileUrl = profileUrl,
+                authenticated = true
+            )
+            if (authenticatedBrowser.isSuccess) return authenticatedBrowser
+
+            val authenticatedGallery = withContext(Dispatchers.IO) {
+                runCatching {
+                    callGalleryCatalog(
+                        profileUrl = profileUrl,
+                        cookieHeader = sessionCookie,
+                        sections = "info,avatar"
+                    )
+                }
+            }
+            if (authenticatedGallery.isSuccess) return authenticatedGallery
+
+            return Result.failure(
+                IllegalStateException(
+                    "Instagram 프로필을 불러오지 못했습니다. " +
+                        "익명 Instaloader: " + (instaloader.exceptionOrNull()?.message ?: "unknown") +
+                        " / 익명 Web: " + (browser.exceptionOrNull()?.message ?: "unknown") +
+                        " / 익명 gallery-dl: " + (gallery.exceptionOrNull()?.message ?: "unknown") +
+                        " / 로그인 Instaloader: " +
+                        (authenticatedInstaloader.exceptionOrNull()?.message ?: "unknown") +
+                        " / 로그인 Web: " +
+                        (authenticatedBrowser.exceptionOrNull()?.message ?: "unknown") +
+                        " / 로그인 gallery-dl: " +
+                        (authenticatedGallery.exceptionOrNull()?.message ?: "unknown")
+                )
+            )
+        }
+
         return Result.failure(
             IllegalStateException(
                 "Instagram 프로필을 불러오지 못했습니다. " +
@@ -83,14 +124,20 @@ object InstagramProfileCatalogEngine {
         isPrivate: Boolean,
         onProgress: (Int) -> Unit = {}
     ): Result<List<InstagramCatalogItem>> {
-        val cookie = if (isPrivate) InstagramSession.cookie().orEmpty() else ""
+        val sessionCookie = InstagramSession.cookie().orEmpty()
+        val requiresSession =
+            section == InstagramCatalogSection.STORIES ||
+                section == InstagramCatalogSection.HIGHLIGHTS ||
+                isPrivate
+
+        val firstCookie = if (requiresSession) sessionCookie else ""
 
         val instaloader = withContext(Dispatchers.IO) {
             runCatching {
                 callInstaloaderSection(
                     profileUrl = profileUrl,
                     section = section,
-                    cookieHeader = cookie
+                    cookieHeader = firstCookie
                 )
             }
         }
@@ -100,6 +147,23 @@ object InstagramProfileCatalogEngine {
             return instaloader
         }
 
+        if (!requiresSession && sessionCookie.isNotBlank()) {
+            val authenticatedInstaloader = withContext(Dispatchers.IO) {
+                runCatching {
+                    callInstaloaderSection(
+                        profileUrl = profileUrl,
+                        section = section,
+                        cookieHeader = sessionCookie
+                    )
+                }
+            }
+            if (authenticatedInstaloader.isSuccess) {
+                val items = authenticatedInstaloader.getOrThrow()
+                onProgress(items.size)
+                return authenticatedInstaloader
+            }
+        }
+
         if (section == InstagramCatalogSection.POSTS ||
             section == InstagramCatalogSection.REELS
         ) {
@@ -107,7 +171,7 @@ object InstagramProfileCatalogEngine {
                 context = context,
                 profileUrl = profileUrl,
                 reelsOnly = section == InstagramCatalogSection.REELS,
-                authenticated = isPrivate,
+                authenticated = requiresSession && sessionCookie.isNotBlank(),
                 onProgress = onProgress
             )
 
@@ -118,9 +182,19 @@ object InstagramProfileCatalogEngine {
             val gallery = loadSectionViaGallery(
                 profileUrl = profileUrl,
                 section = section,
-                isPrivate = isPrivate
+                cookieHeader = if (requiresSession) sessionCookie else ""
             )
             if (gallery.isSuccess) return gallery
+
+            if (!requiresSession && sessionCookie.isNotBlank()) {
+                val authenticatedGallery = loadSectionViaGallery(
+                    profileUrl = profileUrl,
+                    section = section,
+                    cookieHeader = sessionCookie
+                )
+                if (authenticatedGallery.isSuccess) return authenticatedGallery
+            }
+
             if (browser.isSuccess) return browser
 
             return Result.failure(
@@ -136,7 +210,7 @@ object InstagramProfileCatalogEngine {
         val gallery = loadSectionViaGallery(
             profileUrl = profileUrl,
             section = section,
-            isPrivate = isPrivate
+            cookieHeader = sessionCookie
         )
         if (gallery.isSuccess) return gallery
 
@@ -147,6 +221,27 @@ object InstagramProfileCatalogEngine {
                     " / gallery-dl: " + (gallery.exceptionOrNull()?.message ?: "unknown")
             )
         )
+    }
+
+    private suspend fun loadSectionViaGallery(
+        profileUrl: String,
+        section: InstagramCatalogSection,
+        cookieHeader: String
+    ): Result<List<InstagramCatalogItem>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val catalog = callGalleryCatalog(
+                profileUrl = profileUrl,
+                cookieHeader = cookieHeader,
+                sections = section.wireName
+            )
+
+            when (section) {
+                InstagramCatalogSection.STORIES -> catalog.stories
+                InstagramCatalogSection.HIGHLIGHTS -> catalog.highlights
+                InstagramCatalogSection.POSTS -> catalog.posts
+                InstagramCatalogSection.REELS -> catalog.reels
+            }
+        }
     }
 
     private fun callInstaloaderBase(
@@ -192,28 +287,6 @@ object InstagramProfileCatalogEngine {
             error(root.optString("error").ifBlank { "Instaloader section lookup failed" })
         }
         return parseItems(root.optJSONArray("items"))
-    }
-
-    private suspend fun loadSectionViaGallery(
-        profileUrl: String,
-        section: InstagramCatalogSection,
-        isPrivate: Boolean
-    ): Result<List<InstagramCatalogItem>> = withContext(Dispatchers.IO) {
-        runCatching {
-            val cookie = if (isPrivate) InstagramSession.cookie().orEmpty() else ""
-            val catalog = callGalleryCatalog(
-                profileUrl = profileUrl,
-                cookieHeader = cookie,
-                sections = section.wireName
-            )
-
-            when (section) {
-                InstagramCatalogSection.STORIES -> catalog.stories
-                InstagramCatalogSection.HIGHLIGHTS -> catalog.highlights
-                InstagramCatalogSection.POSTS -> catalog.posts
-                InstagramCatalogSection.REELS -> catalog.reels
-            }
-        }
     }
 
     private fun callGalleryCatalog(
