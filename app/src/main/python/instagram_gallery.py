@@ -55,22 +55,23 @@ def _files(root):
     return sorted(items)
 
 
-def _settings(cookie_header="", max_posts=24):
+def _settings(cookie_header="", max_posts=0):
     settings = [
         (("cache",), "file", ":memory:"),
         (("extractor", "instagram"), "videos", True),
         (("extractor", "instagram"), "previews", False),
-        (("extractor", "instagram"), "max-posts", int(max_posts)),
         (("extractor", "instagram"), "sleep-request", "0.5-1.5"),
         (("extractor", "instagram"), "user-cache", "memory"),
     ]
+    if int(max_posts) > 0:
+        settings.append((("extractor", "instagram"), "max-posts", int(max_posts)))
     cookie_map = _cookies(cookie_header)
     if cookie_map:
         settings.append((("extractor", "instagram"), "cookies", cookie_map))
     return settings
 
 
-def _collect(url, cookie_header="", max_posts=24):
+def _collect(url, cookie_header="", max_posts=0):
     with config.apply(_settings(cookie_header, max_posts)):
         task = job.DataJob(url, file=None, resolve=False)
         task.run()
@@ -154,7 +155,7 @@ def _group_cards(data, fallback_kind):
     return list(groups.values())
 
 
-def profile_catalog(url, cookie_header="", max_posts=24, sections="all"):
+def profile_catalog(url, cookie_header="", max_posts=0, sections="all"):
     username = _username(url)
     base = _profile_base(username)
     requested = {
