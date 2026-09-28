@@ -25,6 +25,11 @@ object GrabberEngine {
         onProgress: (GrabProgress) -> Unit = {}
     ): Result<File> = withContext(Dispatchers.IO) {
         runCatching {
+            val engineVersion = YtDlpRuntime.ensureReady { state ->
+                onProgress(GrabProgress(percent = 0f, line = state))
+            }
+            onProgress(GrabProgress(percent = 0f, line = "yt-dlp " + engineVersion))
+
             val root = File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
                 "InstaYtGrabber/$folderName"
@@ -34,6 +39,10 @@ object GrabberEngine {
             request.addOption("--newline")
             request.addOption("--no-mtime")
             request.addOption("--restrict-filenames")
+            request.addOption("--socket-timeout", "15")
+            request.addOption("--retries", "2")
+            request.addOption("--fragment-retries", "2")
+            request.addOption("--remote-components", "ejs:github")
             if (!allowPlaylist) request.addOption("--no-playlist")
             cookieHeader?.takeIf { it.isNotBlank() }?.let {
                 request.addOption("--add-header", "Cookie:$it")
