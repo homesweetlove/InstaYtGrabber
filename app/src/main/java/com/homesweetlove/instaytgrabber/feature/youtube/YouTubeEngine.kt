@@ -4,8 +4,6 @@ import com.homesweetlove.instaytgrabber.core.GrabKind
 import com.homesweetlove.instaytgrabber.core.GrabProgress
 import com.homesweetlove.instaytgrabber.core.GrabberEngine
 import com.homesweetlove.instaytgrabber.core.YtDlpRuntime
-import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -45,31 +43,40 @@ object YouTubeEngine {
         runCatching {
             require(accepts(url)) { "YouTube 링크를 입력해 주세요." }
 
-            val version = YtDlpRuntime.ensureReady(onStatus)
-            onStatus("yt-dlp " + version + " · 영상 정보 확인 중")
+            val chaquopy = YtDlpRuntime.inspect(
+                url = url.trim(),
+                onStatus = onStatus
+            )
 
-            val first = inspectWithFallbacks(url.trim())
-            if (first.isSuccess) {
-                return@runCatching first.getOrThrow()
+            if (chaquopy.isSuccess) {
+                val parsed = parseChaquopyInfo(chaquopy.getOrThrow())
+                if (parsed.isSuccess) {
+                    return@runCatching parsed.getOrThrow()
+                }
+
+                onStatus("yt-dlp 조회 실패 · InnerTube 보조 조회 중")
+                val native = YouTubeNativeLookup.inspect(url.trim())
+                if (native.isSuccess) {
+                    return@runCatching native.getOrThrow()
+                }
+
+                throw IllegalStateException(
+                    "YouTube 링크 조회 실패 · Chaquopy yt-dlp: " +
+                        (parsed.exceptionOrNull()?.message ?: "unknown") +
+                        " / InnerTube: " +
+                        (native.exceptionOrNull()?.message ?: "unknown")
+                )
             }
 
-            onStatus("조회 실패 · yt-dlp 업데이트 후 재시도")
-            YtDlpRuntime.refreshEngine(onStatus)
-
-            val second = inspectWithFallbacks(url.trim())
-            if (second.isSuccess) {
-                return@runCatching second.getOrThrow()
-            }
-
-            onStatus("yt-dlp 조회 실패 · InnerTube 보조 조회 중")
+            onStatus("yt-dlp 실행 실패 · InnerTube 보조 조회 중")
             val native = YouTubeNativeLookup.inspect(url.trim())
             if (native.isSuccess) {
                 return@runCatching native.getOrThrow()
             }
 
             throw IllegalStateException(
-                "YouTube 링크 조회 실패 · yt-dlp: " +
-                    (second.exceptionOrNull()?.message ?: first.exceptionOrNull()?.message ?: "unknown") +
+                "YouTube 링크 조회 실패 · Chaquopy runtime: " +
+                    (chaquopy.exceptionOrNull()?.message ?: "unknown") +
                     " / InnerTube: " +
                     (native.exceptionOrNull()?.message ?: "unknown")
             )
@@ -86,6 +93,7 @@ object YouTubeEngine {
         val inspected = inspect(url) { status ->
             onProgress(GrabProgress(percent = 0f, line = status))
         }
+
         if (inspected.isFailure) {
             return Result.failure(
                 inspected.exceptionOrNull()
@@ -108,107 +116,37 @@ object YouTubeEngine {
         )
     }
 
-    private fun inspectWithFallbacks(url: String): Result<YouTubeMediaInfo> {
-        val attempts = listOf(
-            InspectAttempt(
-                label = "default",
-                extractorArgs = null,
-                remoteEjs = true
-            ),
-            InspectAttempt(
-                label = "multi-client",
-                extractorArgs = "youtube:player_client=android,web,web_safari,mweb,ios",
-                remoteEjs = true
-            ),
-            InspectAttempt(
-                label = "android-client",
-                extractorArgs = "youtube:player_client=android",
-                remoteEjs = false
-            )
-        )
+    private fun parseChaquopyInfo(raw: String): Result<YouTubeMediaInfo> =
+        runCatching {
+            val root = JSONObject(raw)
 
-        val errors = mutableListOf<String>()
-
-        for (attempt in attempts) {
-            val result = runCatching {
-                val request = YoutubeDLRequest(url)
-                    .addOption("--ignore-config")
-                    .addOption("--no-cache-dir")
-                    .addOption("--dump-single-json")
-                    .addOption("--skip-download")
-                    .addOption("--no-playlist")
-                    .addOption("--no-warnings")
-                    .addOption("--socket-timeout", "20")
-                    .addOption("--retries", "2")
-                    .addOption("--extractor-retries", "2")
-                    .addOption("--fragment-retries", "2")
-                    .addOption("--compat-options", "no-youtube-unavailable-videos")
-
-                if (attempt.remoteEjs) {
-                    request.addOption("--remote-components", "ejs:github")
-                }
-
-                attempt.extractorArgs?.let {
-                    request.addOption("--extractor-args", it)
-                }
-
-                val response = YoutubeDL.getInstance().execute(
-                    request,
-                    "yt-inspect-" + System.nanoTime()
+            if (!root.optBoolean("ok", false)) {
+                error(
+                    root.optString("error")
+                        .ifBlank { "yt-dlp가 영상 정보를 반환하지 않았습니다." }
                 )
-
-                parseInfo(response.out)
             }
 
-            if (result.isSuccess) {
-                return result
+            if (root.optBoolean("is_live", false) ||
+                root.optString("live_status") in setOf("is_live", "is_upcoming")
+            ) {
+                error("라이브/예정 방송은 현재 지원하지 않습니다.")
             }
 
-            errors += attempt.label + ": " +
-                (result.exceptionOrNull()?.message ?: "unknown")
-        }
+            val formatCount = root.optInt("format_count", 0)
+            if (formatCount <= 0) {
+                error("재생 가능한 YouTube 포맷을 찾지 못했습니다.")
+            }
 
-        return Result.failure(
-            IllegalStateException(
-                "YouTube 링크 조회 실패 · " + errors.joinToString(" / ")
+            YouTubeMediaInfo(
+                id = root.optString("id"),
+                title = root.optString("title").ifBlank { "제목 없음" },
+                channel = root.optString("channel"),
+                thumbnailUrl = root.optString("thumbnail"),
+                durationSeconds = root.optInt("duration", 0),
+                extractor = "Chaquopy/" +
+                    root.optString("extractor").ifBlank { "yt-dlp" },
+                formatCount = formatCount
             )
-        )
-    }
-
-    private fun parseInfo(raw: String): YouTubeMediaInfo {
-        val root = JSONObject(raw.trim())
-
-        if (root.optBoolean("is_live", false) ||
-            root.optString("live_status") in setOf("is_live", "is_upcoming")
-        ) {
-            error("라이브/예정 방송은 현재 지원하지 않습니다.")
         }
-
-        val formats = root.optJSONArray("formats")
-        val formatCount = formats?.length() ?: 0
-
-        if (formatCount == 0 &&
-            root.optString("url").isBlank()
-        ) {
-            error("재생 가능한 YouTube 포맷을 찾지 못했습니다.")
-        }
-
-        return YouTubeMediaInfo(
-            id = root.optString("id"),
-            title = root.optString("title").ifBlank { "제목 없음" },
-            channel = root.optString("uploader")
-                .ifBlank { root.optString("channel") },
-            thumbnailUrl = root.optString("thumbnail"),
-            durationSeconds = root.optDouble("duration", 0.0).toInt(),
-            extractor = root.optString("extractor_key")
-                .ifBlank { root.optString("extractor") },
-            formatCount = formatCount
-        )
-    }
-
-    private data class InspectAttempt(
-        val label: String,
-        val extractorArgs: String?,
-        val remoteEjs: Boolean
-    )
 }
