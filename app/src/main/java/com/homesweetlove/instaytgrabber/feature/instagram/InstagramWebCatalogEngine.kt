@@ -70,7 +70,8 @@ object InstagramWebCatalogEngine {
             val root = activity.findViewById<ViewGroup>(android.R.id.content)
             val webView = makeWebView(activity)
             webView.alpha = 0.01f
-            root.addView(webView, FrameLayout.LayoutParams(2, 2))
+            webView.translationX = -1200f
+            root.addView(webView, FrameLayout.LayoutParams(1080, 2200))
 
             var finished = false
 
@@ -233,7 +234,8 @@ object InstagramWebCatalogEngine {
             val root = activity.findViewById<ViewGroup>(android.R.id.content)
             val webView = makeWebView(activity)
             webView.alpha = 0.01f
-            root.addView(webView, FrameLayout.LayoutParams(2, 2))
+            webView.translationX = -1200f
+            root.addView(webView, FrameLayout.LayoutParams(1080, 2200))
 
             var finished = false
 
@@ -356,6 +358,13 @@ object InstagramWebCatalogEngine {
             settings.domStorageEnabled = true
             settings.loadsImagesAutomatically = true
             settings.mediaPlaybackRequiresUserGesture = true
+            settings.userAgentString =
+                "Mozilla/5.0 (Linux; Android 16; SM-S928N) " +
+                "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                "Chrome/140.0.0.0 Mobile Safari/537.36"
+            isClickable = false
+            isFocusable = false
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
         }
 
     private suspend fun prepareCookies(authenticated: Boolean) {
