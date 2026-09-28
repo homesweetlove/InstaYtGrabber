@@ -230,7 +230,7 @@ private fun InstagramScreen(initialUrl: String) {
         Text(status, style = MaterialTheme.typography.bodySmall)
         HorizontalDivider()
         Text(
-            "InstaYtGrabber는 최근 URL이나 다운로드 목록을 별도 DB에 저장하지 않습니다. Instagram 서비스 자체의 스토리 조회 표시를 숨기거나 우회하지는 않습니다.",
+            "InstaYtGrabber는 최근 URL이나 다운로드 목록을 별도 DB에 저장하지 않습니다. 스토리 콘텐츠를 앱 안에서 재생하거나 미리보기하지 않고 다운로드 처리만 시도합니다. Instagram 서버의 조회 기록 동작 자체를 숨기거나 우회하지는 않습니다.",
             style = MaterialTheme.typography.bodySmall
         )
     }
