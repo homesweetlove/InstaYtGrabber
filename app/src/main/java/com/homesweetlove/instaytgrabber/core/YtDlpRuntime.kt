@@ -22,6 +22,9 @@ object YtDlpRuntime {
     @Volatile
     private var initError: Throwable? = null
 
+    @Volatile
+    private var updateError: Throwable? = null
+
     fun attach(context: Context) {
         appContext = context.applicationContext
         try {
@@ -64,25 +67,45 @@ object YtDlpRuntime {
             val lastUpdate = prefs.getLong(LAST_UPDATE, 0L)
 
             if (now - lastUpdate >= UPDATE_INTERVAL_MS) {
-                onStatus("yt-dlp 최신 엔진 업데이트 중")
-                try {
+                onStatus("yt-dlp nightly 업데이트 중")
+                val nightly = runCatching {
                     YoutubeDL.getInstance().updateYoutubeDL(
                         appContext,
                         YoutubeDL.UpdateChannel.NIGHTLY
                     )
+                }
+
+                if (nightly.isSuccess) {
+                    updateError = null
                     prefs.edit().putLong(LAST_UPDATE, now).apply()
-                } catch (error: Throwable) {
-                    throw IllegalStateException(
-                        "yt-dlp 업데이트 실패: " + (error.message ?: error.javaClass.simpleName),
-                        error
-                    )
+                } else {
+                    onStatus("nightly 실패 · stable 업데이트 중")
+                    val stable = runCatching {
+                        YoutubeDL.getInstance().updateYoutubeDL(
+                            appContext,
+                            YoutubeDL.UpdateChannel.STABLE
+                        )
+                    }
+
+                    if (stable.isSuccess) {
+                        updateError = null
+                        prefs.edit().putLong(LAST_UPDATE, now).apply()
+                    } else {
+                        updateError = stable.exceptionOrNull() ?: nightly.exceptionOrNull()
+                        onStatus("업데이트 실패 · 번들 yt-dlp로 계속")
+                    }
                 }
             }
 
-            YoutubeDL.getInstance().version(appContext) ?: "bundled"
+            YoutubeDL.getInstance().versionName(appContext)
+                ?: YoutubeDL.getInstance().version(appContext)
+                ?: "bundled"
         }
     }
 
     fun lastInitError(): String? =
         initError?.let { it.message ?: it.javaClass.simpleName }
+
+    fun lastUpdateError(): String? =
+        updateError?.let { it.message ?: it.javaClass.simpleName }
 }
