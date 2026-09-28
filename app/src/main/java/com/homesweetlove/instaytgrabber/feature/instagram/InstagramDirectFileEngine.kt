@@ -55,7 +55,7 @@ object InstagramDirectFileEngine {
 
             val published = StoragePublisher.publishFiles(
                 files = listOf(tempFile),
-                relativeFolder = folderName
+                relativeFolder = "Instagram/" + folderName.trim('/')
             ).first()
 
             tempDir.deleteRecursively()
