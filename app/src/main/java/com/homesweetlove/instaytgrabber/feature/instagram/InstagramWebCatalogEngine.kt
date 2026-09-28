@@ -86,63 +86,67 @@ object InstagramWebCatalogEngine {
             class Bridge {
                 @JavascriptInterface
                 fun onBase(payload: String) {
-                    if (finished) return
-                    finished = true
-                    runCatching {
-                        val obj = org.json.JSONObject(payload)
-                        val pagePath = obj.optString("path")
-                        if (pagePath.trimEnd('/').lowercase() != ("/" + username).lowercase()) {
-                            error("Instagram이 프로필 대신 " + pagePath + " 페이지를 열었습니다.")
-                        }
+                    webView.post {
+                        if (finished) return@post
+                        finished = true
+                        runCatching {
+                            val obj = org.json.JSONObject(payload)
+                            val pagePath = obj.optString("path")
+                            if (pagePath.trimEnd('/').lowercase() != ("/" + username).lowercase()) {
+                                error("Instagram이 프로필 대신 " + pagePath + " 페이지를 열었습니다.")
+                            }
 
-                        val avatarUrl = obj.optString("avatar")
-                        val pageTitle = obj.optString("title")
-                        if (pageTitle.isBlank() && avatarUrl.isBlank()) {
-                            error("Instagram 프로필 메타데이터를 읽지 못했습니다.")
-                        }
+                            val avatarUrl = obj.optString("avatar")
+                            val pageTitle = obj.optString("title")
+                            if (pageTitle.isBlank() && avatarUrl.isBlank()) {
+                                error("Instagram 프로필 메타데이터를 읽지 못했습니다.")
+                            }
 
-                        val avatar = avatarUrl.takeIf { it.startsWith("http") }?.let {
-                            InstagramCatalogItem(
-                                id = "avatar:" + username,
-                                kind = "avatar",
-                                title = "프로필 사진",
-                                targetUrl = it,
-                                previewUrl = it,
-                                isVideo = false,
-                                date = "",
-                                count = 1
+                            val avatar = avatarUrl.takeIf { it.startsWith("http") }?.let {
+                                InstagramCatalogItem(
+                                    id = "avatar:" + username,
+                                    kind = "avatar",
+                                    title = "프로필 사진",
+                                    targetUrl = it,
+                                    previewUrl = it,
+                                    isVideo = false,
+                                    date = "",
+                                    count = 1
+                                )
+                            }
+
+                            InstagramProfileCatalog(
+                                username = username,
+                                fullName = pageTitle
+                                    .substringBefore("(@")
+                                    .substringBefore(" •")
+                                    .trim(),
+                                biography = obj.optString("description"),
+                                isPrivate = obj.optBoolean("private", false),
+                                avatar = avatar
                             )
-                        }
-
-                        InstagramProfileCatalog(
-                            username = username,
-                            fullName = pageTitle
-                                .substringBefore("(@")
-                                .substringBefore(" •")
-                                .trim(),
-                            biography = obj.optString("description"),
-                            isPrivate = obj.optBoolean("private", false),
-                            avatar = avatar
+                        }.fold(
+                            onSuccess = { catalog ->
+                                cleanup()
+                                if (cont.isActive) cont.resume(catalog)
+                            },
+                            onFailure = { error ->
+                                cleanup()
+                                if (cont.isActive) cont.resumeWith(Result.failure(error))
+                            }
                         )
-                    }.fold(
-                        onSuccess = { catalog ->
-                            cleanup()
-                            if (cont.isActive) cont.resume(catalog)
-                        },
-                        onFailure = { error ->
-                            cleanup()
-                            if (cont.isActive) cont.resumeWith(Result.failure(error))
-                        }
-                    )
+                    }
                 }
 
                 @JavascriptInterface
                 fun onError(message: String) {
-                    if (finished) return
-                    finished = true
-                    cleanup()
-                    if (cont.isActive) {
-                        cont.resumeWith(Result.failure(IllegalStateException(message)))
+                    webView.post {
+                        if (finished) return@post
+                        finished = true
+                        cleanup()
+                        if (cont.isActive) {
+                            cont.resumeWith(Result.failure(IllegalStateException(message)))
+                        }
                     }
                 }
             }
@@ -245,50 +249,54 @@ object InstagramWebCatalogEngine {
             class Bridge {
                 @JavascriptInterface
                 fun onProgress(count: Int) {
-                    if (!finished) onProgress(count)
+                    webView.post {
+                        if (!finished) onProgress(count)
+                    }
                 }
 
                 @JavascriptInterface
                 fun onGrid(payload: String) {
-                    if (finished) return
-                    finished = true
-                    runCatching {
-                        val array = JSONArray(payload)
-                        buildList {
-                            for (i in 0 until array.length()) {
-                                val obj = array.optJSONObject(i) ?: continue
-                                val href = obj.optString("href")
-                                val preview = obj.optString("preview")
-                                val kind = if (href.contains("/reel/")) "reel" else "post"
-                                if (reelsOnly && kind != "reel") continue
-                                if (!reelsOnly && kind != "post") continue
+                    webView.post {
+                        if (finished) return@post
+                        finished = true
+                        runCatching {
+                            val array = JSONArray(payload)
+                            buildList {
+                                for (i in 0 until array.length()) {
+                                    val obj = array.optJSONObject(i) ?: continue
+                                    val href = obj.optString("href")
+                                    val preview = obj.optString("preview")
+                                    val kind = if (href.contains("/reel/")) "reel" else "post"
+                                    if (reelsOnly && kind != "reel") continue
+                                    if (!reelsOnly && kind != "post") continue
 
-                                add(
-                                    InstagramCatalogItem(
-                                        id = href,
-                                        kind = kind,
-                                        title = obj.optString("title").ifBlank {
-                                            if (kind == "reel") "릴스" else "게시글"
-                                        },
-                                        targetUrl = "https://www.instagram.com" + href,
-                                        previewUrl = preview,
-                                        isVideo = kind == "reel",
-                                        date = "",
-                                        count = 1
+                                    add(
+                                        InstagramCatalogItem(
+                                            id = href,
+                                            kind = kind,
+                                            title = obj.optString("title").ifBlank {
+                                                if (kind == "reel") "릴스" else "게시글"
+                                            },
+                                            targetUrl = "https://www.instagram.com" + href,
+                                            previewUrl = preview,
+                                            isVideo = kind == "reel",
+                                            date = "",
+                                            count = 1
+                                        )
                                     )
-                                )
+                                }
                             }
-                        }
-                    }.fold(
-                        onSuccess = { items ->
-                            cleanup()
-                            if (cont.isActive) cont.resume(items)
-                        },
-                        onFailure = { error ->
-                            cleanup()
-                            if (cont.isActive) cont.resumeWith(Result.failure(error))
-                        }
-                    )
+                        }.fold(
+                            onSuccess = { items ->
+                                cleanup()
+                                if (cont.isActive) cont.resume(items)
+                            },
+                            onFailure = { error ->
+                                cleanup()
+                                if (cont.isActive) cont.resumeWith(Result.failure(error))
+                            }
+                        )
+                    }
                 }
 
                 @JavascriptInterface
