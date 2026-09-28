@@ -31,10 +31,48 @@ object InstagramEngine {
     ): Result<File> {
         require(accepts(url)) { "Instagram 링크를 입력해 주세요." }
 
+        onProgress(GrabProgress(percent = 0f, line = "anonymous"))
+
+        val anonymousResult = downloadWithSession(
+            url = url,
+            type = type,
+            output = output,
+            cookieHeader = null,
+            onProgress = onProgress
+        )
+
+        if (anonymousResult.isSuccess) {
+            return anonymousResult
+        }
+
+        val cookie = InstagramSession.cookie()
+        if (cookie.isNullOrBlank()) {
+            return anonymousResult
+        }
+
+        onProgress(GrabProgress(percent = 0f, line = "authenticated"))
+
+        return downloadWithSession(
+            url = url,
+            type = type,
+            output = output,
+            cookieHeader = cookie,
+            onProgress = onProgress
+        )
+    }
+
+    private suspend fun downloadWithSession(
+        url: String,
+        type: InstagramMediaType,
+        output: InstagramOutputType,
+        cookieHeader: String?,
+        onProgress: (GrabProgress) -> Unit
+    ): Result<File> {
         return when (output) {
             InstagramOutputType.MEDIA -> InstagramGalleryEngine.download(
                 url = url,
                 type = type,
+                cookieHeader = cookieHeader,
                 onProgress = onProgress
             )
 
@@ -42,7 +80,7 @@ object InstagramEngine {
                 url = url.trim(),
                 kind = GrabKind.AUDIO,
                 folderName = "Instagram/${type.folder}/audio",
-                cookieHeader = InstagramSession.cookie(),
+                cookieHeader = cookieHeader,
                 allowPlaylist = type == InstagramMediaType.HIGHLIGHT,
                 onProgress = onProgress
             )
