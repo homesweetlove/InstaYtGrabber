@@ -41,25 +41,24 @@ object InstagramProfileCatalogEngine {
     suspend fun loadBase(profileUrl: String): Result<InstagramProfileCatalog> =
         withContext(Dispatchers.IO) {
             runCatching {
-                val anonymous = callCatalog(
-                    profileUrl = profileUrl,
-                    cookieHeader = "",
-                    sections = "info,avatar"
-                )
+                val anonymous = runCatching {
+                    callCatalog(
+                        profileUrl = profileUrl,
+                        cookieHeader = "",
+                        sections = "info,avatar"
+                    )
+                }
 
-                if (anonymous.username.isNotBlank() && anonymous.errors["info"].isNullOrBlank()) {
-                    anonymous
-                } else {
+                anonymous.getOrElse { anonymousError ->
                     val cookie = InstagramSession.cookie()
                     if (cookie.isNullOrBlank()) {
-                        anonymous
-                    } else {
-                        callCatalog(
-                            profileUrl = profileUrl,
-                            cookieHeader = cookie,
-                            sections = "info,avatar"
-                        )
+                        throw anonymousError
                     }
+                    callCatalog(
+                        profileUrl = profileUrl,
+                        cookieHeader = cookie,
+                        sections = "info,avatar"
+                    )
                 }
             }
         }
