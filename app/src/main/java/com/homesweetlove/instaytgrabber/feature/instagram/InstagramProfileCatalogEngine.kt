@@ -44,7 +44,8 @@ object InstagramProfileCatalogEngine {
                 val cookie = InstagramSession.cookie()
 
                 if (!cookie.isNullOrBlank()) {
-                    val needsProtected = anonymous.stories.isEmpty() || anonymous.highlights.isEmpty()
+                    val needsProtected = anonymous.isPrivate &&
+                        (anonymous.errors.containsKey("stories") || anonymous.errors.containsKey("highlights"))
                     if (needsProtected) {
                         val protected = callCatalog(
                             profileUrl = profileUrl,
