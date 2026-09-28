@@ -90,7 +90,17 @@ object InstagramWebCatalogEngine {
                     finished = true
                     runCatching {
                         val obj = org.json.JSONObject(payload)
+                        val pagePath = obj.optString("path")
+                        if (pagePath.trimEnd('/').lowercase() != ("/" + username).lowercase()) {
+                            error("Instagram이 프로필 대신 " + pagePath + " 페이지를 열었습니다.")
+                        }
+
                         val avatarUrl = obj.optString("avatar")
+                        val pageTitle = obj.optString("title")
+                        if (pageTitle.isBlank() && avatarUrl.isBlank()) {
+                            error("Instagram 프로필 메타데이터를 읽지 못했습니다.")
+                        }
+
                         val avatar = avatarUrl.takeIf { it.startsWith("http") }?.let {
                             InstagramCatalogItem(
                                 id = "avatar:" + username,
@@ -106,7 +116,7 @@ object InstagramWebCatalogEngine {
 
                         InstagramProfileCatalog(
                             username = username,
-                            fullName = obj.optString("title")
+                            fullName = pageTitle
                                 .substringBefore("(@")
                                 .substringBefore(" •")
                                 .trim(),
