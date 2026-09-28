@@ -52,6 +52,7 @@ import com.homesweetlove.instaytgrabber.feature.instagram.InstagramOutputType
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileCatalog
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileCatalogEngine
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramSession
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramWebMediaEngine
 import kotlinx.coroutines.launch
 
 private enum class InstagramSection(
@@ -362,14 +363,26 @@ fun InstagramProfileBrowserScreen(initialUrl: String) {
                                 else -> InstagramMediaType.POST
                             }
 
-                            val result = if (item.kind == "avatar") {
-                                InstagramDirectFileEngine.download(
+                            val result = when (item.kind) {
+                                "avatar" -> InstagramDirectFileEngine.download(
                                     url = item.targetUrl,
                                     folderName = "profile/media",
                                     baseName = "profile_" + (profile?.username ?: "instagram")
                                 )
-                            } else {
-                                InstagramEngine.download(
+
+                                "post", "reel" -> InstagramWebMediaEngine.download(
+                                    context = context,
+                                    pageUrl = item.targetUrl,
+                                    folderName = item.kind + "/media",
+                                    baseName = (profile?.username ?: "instagram") + "_" +
+                                        item.kind + "_" + (index + 1),
+                                    authenticated = profile?.isPrivate == true
+                                ) { progress ->
+                                    status = (index + 1).toString() + "/" + chosen.size +
+                                        " · " + progress.line
+                                }
+
+                                else -> InstagramEngine.download(
                                     url = item.targetUrl,
                                     type = type,
                                     output = InstagramOutputType.MEDIA,
