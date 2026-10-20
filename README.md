@@ -63,11 +63,22 @@ Open the project in Android Studio, run Gradle Sync, then launch it.
 
 For local CLI builds, JDK 17 and Python 3.11 are required.
 
+### Bundled JavaScript runtime for YouTube
+
+Recent yt-dlp versions require an external JavaScript runtime and compatible EJS scripts. This project cross-compiles **QuickJS-NG v0.17.0** (MIT) directly from its [upstream source](https://github.com/quickjs-ng/quickjs/releases/tag/v0.17.0) at commit `6d46d07d04041b40f4f49eaa7fdebe44c314c699`. No GPL code from other downloader apps has been copied.
+
+The native executable is packaged as `libqjs.so` in `app/src/main/jniLibs/<ABI>` for `arm64-v8a`, `armeabi-v7a`, and `x86_64`. yt-dlp is pinned to `2026.08.19` and EJS to `0.8.0` to keep versions compatible.
+
+GitHub Actions compiles QuickJS before building an APK. For local builds, install Android NDK **27.2.12479018**, CMake, Ninja and Git, then run:
+
 ```bash
+bash .github/scripts/build-quickjs-android.sh
 gradle :app:assembleDebug
 ```
 
-GitHub Actions also builds a debug APK automatically on pushes to `main`. After a successful run, download it from **Artifacts → InstaYtGrabber-debug**.
+The app checks that QuickJS actually runs before YouTube video/audio downloads. A successful APK build alone does **not** guarantee download success against YouTube: test on a real Android device.
+
+On successful `main` builds, the APK is published under [GitHub Releases — debug-latest](https://github.com/homesweetlove/InstaYtGrabber/releases/tag/debug-latest). The Actions page provides the build logs.
 
 ## Privacy Direction
 
