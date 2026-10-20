@@ -30,6 +30,22 @@ class InstagramRateLimitTest {
     }
 
     @Test
+    fun loginHttp429BlocksLoginAndAnonymousApiRetries() {
+        InstagramRateLimit.onLoginHttp429(now = baseTime)
+        assertTrue(InstagramRateLimit.shouldSkipLogin(baseTime + 5_000L))
+        assertTrue(InstagramRateLimit.shouldSkip(baseTime + 5_000L))
+        assertEquals(60L, InstagramRateLimit.loginRemainingMinutes(baseTime))
+        assertFalse(InstagramRateLimit.shouldSkipLogin(baseTime + 60L * 60L * 1000L))
+    }
+
+    @Test
+    fun honorsNumericRetryAfterWithoutGuessingServerExpiry() {
+        InstagramRateLimit.onLoginHttp429(retryAfterSeconds = 120L, now = baseTime)
+        assertTrue(InstagramRateLimit.shouldSkipLogin(baseTime + 119_000L))
+        assertFalse(InstagramRateLimit.shouldSkipLogin(baseTime + 120_000L))
+    }
+
+    @Test
     fun recognizesRateLimitMessageWithoutStatusCode() {
         assertTrue(InstagramRateLimit.onFailure(
             "rate limited by remote service", baseTime
