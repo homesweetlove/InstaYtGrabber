@@ -24,6 +24,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +64,9 @@ import com.homesweetlove.instaytgrabber.ui.YouTubeGlyph
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private var incomingUrl by mutableStateOf("")
+    private var incomingVersion by mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.light(
@@ -77,16 +82,28 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 100)
         }
-        val sharedUrl = if (intent?.action == Intent.ACTION_SEND) {
+        incomingUrl = sharedLink(intent)
+
+        setContent {
+            key(incomingVersion) {
+                InstaYtGrabberApp(incomingUrl)
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        incomingUrl = sharedLink(intent)
+        incomingVersion++
+    }
+
+    private fun sharedLink(intent: Intent?): String =
+        if (intent?.action == Intent.ACTION_SEND) {
             intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
         } else {
             ""
         }
-
-        setContent {
-            InstaYtGrabberApp(sharedUrl)
-        }
-    }
 }
 
 enum class PlatformTab(val label: String) {
