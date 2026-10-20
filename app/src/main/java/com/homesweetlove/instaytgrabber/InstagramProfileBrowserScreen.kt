@@ -1,6 +1,13 @@
 package com.homesweetlove.instaytgrabber
 
+import android.net.http.SslError
 import android.webkit.CookieManager
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.SslErrorHandler
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
@@ -30,8 +37,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -901,15 +910,26 @@ private fun ProfileInstagramLoginDialog(
     onDismiss: () -> Unit,
     onUseSession: () -> Unit
 ) {
+    var loading by remember { mutableStateOf(true) }
+    var progress by remember { mutableIntStateOf(0) }
+    var pageStatus by remember { mutableStateOf("Instagram 로그인 페이지 연결 중…") }
+    var errorStatus by remember { mutableStateOf("") }
+    var retryKey by remember { mutableIntStateOf(0) }
+    var signedIn by remember { mutableStateOf(false) }
+    val loginUrl = "https://www.instagram.com/accounts/login/"
+
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.92f)
-                .padding(horizontal = 12.dp),
+                .fillMaxHeight(0.94f)
+                .padding(horizontal = 8.dp),
             shape = RoundedCornerShape(22.dp),
             color = Color.White
         ) {
@@ -917,33 +937,207 @@ private fun ProfileInstagramLoginDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 20.dp, end = 12.dp, top = 16.dp, bottom = 12.dp),
+                        .padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("Instagram 로그인", style = TossType.Name.copy(fontSize = TossType.Button.fontSize), color = Toss.Text1)
-                        Text("로그인한 뒤 '세션 사용'을 눌러 주세요", style = TossType.Sub, color = Toss.Text3)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Instagram 로그인", style = TossType.Section, color = Toss.Text1)
+                        Text(
+                            "Instagram 공식 페이지에서 로그인하세요",
+                            style = TossType.Caption,
+                            color = Toss.Text3
+                        )
                     }
                     ToolbarAction("닫기", true, onDismiss)
-                    TossButton(text = "세션 사용", onClick = onUseSession, compact = true)
                 }
-
-                AndroidView(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    factory = { context ->
-                        CookieManager.getInstance().setAcceptCookie(true)
-                        WebView(context).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            webViewClient = WebViewClient()
-                            loadUrl("https://www.instagram.com/accounts/login/")
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (loading) SmallSpinner()
+                    Text(
+                        if (loading) pageStatus + " " + progress + "%"
+                        else if (errorStatus.isNotBlank()) errorStatus
+                        else "로그인 화면에서 인증을 완료해 주세요",
+                        style = TossType.Caption,
+                        color = if (errorStatus.isBlank()) Toss.Text3 else Toss.Red,
+                        modifier = Modifier.weight(1f)
+                    )
+                    ToolbarAction("새로고침", true) {
+                        errorStatus = ""
+                        loading = true
+                        progress = 0
+                        retryKey++
+                    }
+                    ToolbarAction("세션 확인", true) {
+                        if (InstagramSession.captureFromWebView()) {
+                            if (!signedIn) {
+                                signedIn = true
+                                onUseSession()
+                            }
+                        } else {
+                            pageStatus = "로그인 후 세션을 확인해 주세요"
+                            errorStatus = "아직 Instagram 로그인 세션이 없습니다."
                         }
                     }
+                }
+                // The WebView has to be a real, visible browser, not the hidden
+                // Instagram media-extraction WebView. The system WebView UA has
+                // a "; wv" marker which Instagram may respond to with a blank page.
+                key(retryKey) {
+                    AndroidView(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        factory = { context ->
+                            val cookieManager = CookieManager.getInstance()
+                            cookieManager.setAcceptCookie(true)
+                            WebView(context).apply {
+                                setBackgroundColor(android.graphics.Color.WHITE)
+                                settings.javaScriptEnabled = true
+                                settings.domStorageEnabled = true
+                                settings.loadsImagesAutomatically = true
+                                settings.javaScriptCanOpenWindowsAutomatically = false
+                                settings.useWideViewPort = true
+                                // Use the installed Chromium version, omitting
+                                // the embedded WebView token, rather than a stale
+                                // hard-coded Chrome version.
+                                val originalUserAgent = settings.userAgentString
+                                settings.userAgentString = originalUserAgent
+                                    .replace("; wv", "")
+                                    .replace("Version/4.0 ", "")
+                                    .replace(";wv", "")
+                                cookieManager.setAcceptThirdPartyCookies(this, true)
+
+                                webChromeClient = object : WebChromeClient() {
+                                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                        progress = newProgress
+                                    }
+                                }
+                                webViewClient = object : WebViewClient() {
+                                    override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                                        loading = true
+                                        errorStatus = ""
+                                        pageStatus = "Instagram 페이지 여는 중…"
+                                    }
+
+                                    override fun onPageFinished(view: WebView, url: String?) {
+                                        cookieManager.flush()
+                                        loading = false
+                                        progress = 100
+                                        pageStatus = "Instagram 페이지를 열었어요"
+                                        if (InstagramSession.captureFromWebView() && !signedIn) {
+                                            signedIn = true
+                                            onUseSession()
+                                            return
+                                        }
+                                        // Instagram's JS may render after onPageFinished.
+                                        // Only diagnose a persistently blank body.
+                                        view.postDelayed({
+                                            if (view.isAttachedToWindow && !signedIn &&
+                                                errorStatus.isBlank()
+                                            ) {
+                                                view.evaluateJavascript(
+                                                    "(document.body && document.body.innerText ? document.body.innerText.trim().length : 0)"
+                                                ) { result ->
+                                                    if (result.trim('"').toIntOrNull() == 0 &&
+                                                        errorStatus.isBlank() && !signedIn
+                                                    ) {
+                                                        errorStatus = "로그인 페이지가 비어 있습니다. 새로고침하거나 Android System WebView를 업데이트해 주세요."
+                                                        DiagnosticLog.record(
+                                                            "IG-LOGIN-BLANK",
+                                                            "Instagram 로그인 화면",
+                                                            "로그인 페이지가 표시됐지만 본문이 비어 있습니다."
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }, 4500L)
+                                    }
+
+                                    override fun onReceivedHttpError(
+                                        view: WebView,
+                                        request: WebResourceRequest,
+                                        response: WebResourceResponse
+                                    ) {
+                                        if (!request.isForMainFrame) return
+                                        val code = response.statusCode
+                                        errorStatus = "Instagram 서버 응답 오류: HTTP " + code
+                                        DiagnosticLog.record(
+                                            "IG-LOGIN-HTTP-" + code,
+                                            "Instagram 로그인 화면",
+                                            "로그인 페이지 요청의 HTTP 응답 코드: " + code
+                                        )
+                                    }
+
+                                    override fun onReceivedError(
+                                        view: WebView,
+                                        request: WebResourceRequest,
+                                        error: WebResourceError
+                                    ) {
+                                        if (!request.isForMainFrame) return
+                                        loading = false
+                                        errorStatus = "로그인 페이지 네트워크 오류 (" + error.errorCode + "): " + error.description
+                                        DiagnosticLog.record(
+                                            "IG-LOGIN-NET",
+                                            "Instagram 로그인 화면",
+                                            "WebView error " + error.errorCode + ": " + error.description
+                                        )
+                                    }
+
+                                    override fun onReceivedSslError(
+                                        view: WebView,
+                                        handler: SslErrorHandler,
+                                        error: SslError
+                                    ) {
+                                        handler.cancel()
+                                        loading = false
+                                        errorStatus = "로그인 페이지의 보안 인증서를 검증할 수 없습니다."
+                                        DiagnosticLog.record(
+                                            "IG-LOGIN-SSL",
+                                            "Instagram 로그인 화면",
+                                            "TLS certificate validation failed: " + error.primaryError
+                                        )
+                                    }
+
+                                    override fun onRenderProcessGone(
+                                        view: WebView,
+                                        detail: RenderProcessGoneDetail
+                                    ): Boolean {
+                                        DiagnosticLog.record(
+                                            "IG-LOGIN-RENDER",
+                                            "Instagram 로그인 화면",
+                                            "WebView 렌더러 종료됨 (crash=" + detail.didCrash() + ")"
+                                        )
+                                        loading = false
+                                        errorStatus = "웹 화면이 중지됐습니다. 새로고침을 눌러 주세요."
+                                        // A dead renderer cannot be reused. A new key
+                                        // creates a fresh WebView on the next retry.
+                                        return true
+                                    }
+                                }
+                                loadUrl(loginUrl)
+                            }
+                        },
+                        onRelease = { webView ->
+                            webView.stopLoading()
+                            webView.webChromeClient = null
+                            webView.webViewClient = WebViewClient()
+                            webView.destroy()
+                        }
+                    )
+                }
+                Text(
+                    "Instagram에서 웹 로그인을 제한하면 접속할 수 없을 수 있습니다. " +
+                        "세션 정보는 기기에만 보관합니다. 로그인되지 않은 상태에서 세션 확인을 눌러도 연결하지 않습니다.",
+                    style = TossType.Caption,
+                    color = Toss.Text3,
+                    modifier = Modifier.padding(12.dp)
                 )
             }
         }
     }
 }
+
