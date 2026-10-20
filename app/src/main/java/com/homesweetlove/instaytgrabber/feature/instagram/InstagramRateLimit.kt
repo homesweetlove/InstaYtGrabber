@@ -9,9 +9,14 @@ import android.content.SharedPreferences
  */
 object InstagramRateLimit {
     private const val COOLDOWN_MS = 15L * 60L * 1000L
+    // Local safety delay only; Instagram controls the real unblock time.
+    private const val LOGIN_COOLDOWN_MS = 60L * 60L * 1000L
 
     @Volatile
     private var instaloaderBlockedUntil: Long = 0L
+
+    @Volatile
+    private var loginBlockedUntil: Long = 0L
 
     @Volatile
     private var preferences: SharedPreferences? = null
@@ -24,6 +29,10 @@ object InstagramRateLimit {
         instaloaderBlockedUntil = maxOf(
             instaloaderBlockedUntil,
             preferences?.getLong("instaloader_blocked_until", 0L) ?: 0L
+        )
+        loginBlockedUntil = maxOf(
+            loginBlockedUntil,
+            preferences?.getLong("login_blocked_until", 0L) ?: 0L
         )
     }
 
@@ -47,9 +56,33 @@ object InstagramRateLimit {
     fun remainingMinutes(now: Long = System.currentTimeMillis()): Long =
         ((instaloaderBlockedUntil - now).coerceAtLeast(0L) + 59_999L) / 60_000L
 
+    /** Use Retry-After when Instagram provides it. Otherwise pause retries for
+     * one hour to avoid hammering the login endpoint. This is NOT the server's
+     * advertised unblock time and the user may still see 429 afterward. */
+    @Synchronized
+    fun onLoginHttp429(
+        retryAfterSeconds: Long? = null,
+        now: Long = System.currentTimeMillis()
+    ) {
+        val duration = retryAfterSeconds
+            ?.takeIf { it > 0L }
+            ?.coerceAtMost(24L * 60L * 60L)
+            ?.times(1000L)
+            ?: LOGIN_COOLDOWN_MS
+        loginBlockedUntil = maxOf(loginBlockedUntil, now + duration)
+        preferences?.edit()?.putLong("login_blocked_until", loginBlockedUntil)?.apply()
+    }
+
+    fun shouldSkipLogin(now: Long = System.currentTimeMillis()): Boolean =
+        now < loginBlockedUntil
+
+    fun loginRemainingMinutes(now: Long = System.currentTimeMillis()): Long =
+        ((loginBlockedUntil - now).coerceAtLeast(0L) + 59_999L) / 60_000L
+
     @Synchronized
     fun resetForTests() {
         instaloaderBlockedUntil = 0L
-        preferences?.edit()?.remove("instaloader_blocked_until")?.apply()
+        loginBlockedUntil = 0L
+        preferences?.edit()?.remove("instaloader_blocked_until")?.remove("login_blocked_until")?.apply()
     }
 }
