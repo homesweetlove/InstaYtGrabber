@@ -98,12 +98,14 @@ class MainActivity : ComponentActivity() {
         incomingVersion++
     }
 
-    private fun sharedLink(intent: Intent?): String =
-        if (intent?.action == Intent.ACTION_SEND) {
-            intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
-        } else {
-            ""
-        }
+    private fun sharedLink(intent: Intent?): String {
+        if (intent?.action != Intent.ACTION_SEND) return ""
+        val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
+        return Regex("""https?://\S+""").findAll(sharedText)
+            .map { it.value.trimEnd('.', ',', ')', ']', '>', '"') }
+            .firstOrNull { InstagramEngine.accepts(it) || YouTubeEngine.accepts(it) }
+            .orEmpty()
+    }
 }
 
 enum class PlatformTab(val label: String) {
