@@ -177,9 +177,6 @@ object InstagramWebCatalogEngine {
                         """
                         (() => {
                           try {
-                            history.pushState({}, '', '/$username/');
-                            window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
-
                             setTimeout(() => {
                               try {
                                 const bodyText = document.body?.innerText || '';
@@ -253,7 +250,8 @@ object InstagramWebCatalogEngine {
                 webView.post { cleanup() }
             }
 
-            webView.loadUrl("https://www.instagram.com/")
+            // Changing history alone does not load Instagram's profile data.
+            webView.loadUrl("https://www.instagram.com/$username/")
         }
     }
 
