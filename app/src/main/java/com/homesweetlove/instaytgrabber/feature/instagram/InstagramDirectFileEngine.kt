@@ -17,6 +17,8 @@ object InstagramDirectFileEngine {
             require(url.startsWith("https://")) { "HTTPS 미디어 URL이 아닙니다." }
 
             val connection = URL(url).openConnection() as HttpURLConnection
+            var tempDir: File? = null
+            try {
             connection.instanceFollowRedirects = true
             connection.connectTimeout = 10_000
             connection.readTimeout = 30_000
@@ -42,9 +44,10 @@ object InstagramDirectFileEngine {
                     ?: "bin"
             }
 
-            val tempDir = StoragePublisher.tempDirectory(folderName)
+            val stagingDir = StoragePublisher.tempDirectory(folderName)
+            tempDir = stagingDir
             val safeName = baseName.replace(Regex("[^A-Za-z0-9._-]"), "_")
-            val tempFile = File(tempDir, safeName + "." + extension)
+            val tempFile = File(stagingDir, safeName + "." + extension)
 
             connection.inputStream.use { input ->
                 tempFile.outputStream().use { stream ->
@@ -58,8 +61,11 @@ object InstagramDirectFileEngine {
                 relativeFolder = "Instagram/" + folderName.trim('/')
             ).first()
 
-            tempDir.deleteRecursively()
             published
+            } finally {
+                connection.disconnect()
+                tempDir?.deleteRecursively()
+            }
         }
     }
 }
