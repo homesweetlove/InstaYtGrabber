@@ -41,6 +41,8 @@ object YouTubeNativeLookup {
         )
     )
 
+    fun videoId(url: String): String? = extractVideoId(url)
+
     suspend fun inspect(url: String): Result<YouTubeMediaInfo> =
         withContext(Dispatchers.IO) {
             runCatching {
