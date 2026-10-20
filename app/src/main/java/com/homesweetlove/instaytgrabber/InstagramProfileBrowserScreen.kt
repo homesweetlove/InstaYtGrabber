@@ -91,7 +91,7 @@ private enum class InstagramSection(
     REEL("릴스", InstagramCatalogSection.REELS)
 }
 
-private const val IDLE_STATUS = "공개 프로필은 로그인 없이 익명으로 조회해요"
+private const val IDLE_STATUS = "공개 계정의 게시글·릴스는 로그인 없이도 조회할 수 있어요"
 
 @Composable
 fun InstagramProfileBrowserScreen(
@@ -505,9 +505,9 @@ fun InstagramProfileBrowserScreen(
             BottomCta(
                 modifier = Modifier.align(Alignment.BottomCenter),
                 caption = if (loggedIn) {
-                    "공개 프로필은 로그인 쿠키 없이 저장하고, 비공개 프로필만 연결한 세션을 사용해요"
+                    "로그인이 연결되어 있어요 · 스토리·하이라이트도 조회해 보세요"
                 } else {
-                    "공개 프로필은 익명으로 저장해요 · 기록은 남기지 않아요"
+                    "공개 게시글·릴스는 로그인 없이 조회를 시도해요"
                 }
             ) {
                 TossButton(
@@ -531,7 +531,7 @@ fun InstagramProfileBrowserScreen(
                     "IG-AUTH-01", "Instagram 로그인 연결", "세션 쿠키를 확인하지 못했습니다."
                 )
                 status = if (loggedIn) {
-                    "Instagram 임시 로그인을 연결했어요"
+                    "Instagram 로그인을 연결했어요"
                 } else {
                     "로그인 세션을 찾지 못했어요"
                 }
@@ -576,7 +576,7 @@ private fun AccountCard(
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Instagram 로그인", style = TossType.Body, color = Toss.Text1)
                 Text(
-                    if (loggedIn) "비공개 계정에만 세션을 사용해요" else "비공개 계정을 볼 때만 필요해요",
+                    if (loggedIn) "스토리·하이라이트에도 로그인 세션을 사용할 수 있어요" else "스토리·하이라이트를 확인할 때 연결해 주세요",
                     style = TossType.Sub,
                     color = Toss.Text3
                 )
