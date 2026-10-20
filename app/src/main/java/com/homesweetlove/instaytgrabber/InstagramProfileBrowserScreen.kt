@@ -167,9 +167,10 @@ fun InstagramProfileBrowserScreen(
             DiagnosticLog.record("IG-LINK-INPUT", "Chrome 공유 링크", "올바르지 않은 게시글 또는 릴스 주소")
             return
         }
-        if (InstagramRateLimit.shouldSkip() && !InstagramSession.isLoggedIn()) {
-            directLinkStatus = "Instagram에서 429 요청 제한이 발생했습니다. " +
-                "이 앱의 자동 요청을 잠시 중단했습니다. 서버 제한이 풀린 후 시도해 주세요."
+        if (InstagramRateLimit.shouldSkipMedia()) {
+            directLinkStatus = "해당 미디어 요청에서 HTTP 429가 발생했습니다. " +
+                "약 " + InstagramRateLimit.mediaRemainingMinutes() +
+                "분간 미디어 재요청을 중단합니다. 실제 제한 시간은 서버가 결정합니다."
             return
         }
         scope.launch {
@@ -180,19 +181,40 @@ fun InstagramProfileBrowserScreen(
                 detail = "원본 미디어 정보를 확인하고 있어요",
                 progress = 0f
             )
-            val result = InstagramEngine.download(
-                url = media.canonicalUrl,
-                type = media.type,
-                output = InstagramOutputType.MEDIA,
-                allowAuthenticatedFallback = InstagramSession.isLoggedIn(),
-                onProgress = { progress ->
+            val progressCallback: (com.homesweetlove.instaytgrabber.core.GrabProgress) -> Unit =
+                { progress ->
                     task = TaskState.Running(
                         title = media.type.label + " 저장 중",
                         detail = progress.line,
                         progress = (progress.percent / 100f).coerceIn(0f, 1f)
                     )
                 }
+            // Single-media embeds do not require a profile-info request.
+            // Try the real Chromium page before the Python REST extractors.
+            val embedded = InstagramWebMediaEngine.download(
+                context = context,
+                pageUrl = media.canonicalUrl,
+                folderName = media.type.folder + "/media",
+                baseName = "chrome_shared_" + System.currentTimeMillis(),
+                authenticated = InstagramSession.isLoggedIn(),
+                onProgress = progressCallback
             )
+            val result = if (embedded.isSuccess || InstagramRateLimit.shouldSkipMedia()) {
+                embedded
+            } else {
+                embedded.exceptionOrNull()?.let { error ->
+                    DiagnosticLog.failure(
+                        "IG-EMBED-01", "단일 게시물 / 브라우저 embed 추출", error
+                    )
+                }
+                InstagramEngine.download(
+                    url = media.canonicalUrl,
+                    type = media.type,
+                    output = InstagramOutputType.MEDIA,
+                    allowAuthenticatedFallback = InstagramSession.isLoggedIn(),
+                    onProgress = progressCallback
+                )
+            }
             result.fold(
                 onSuccess = {
                     task = TaskState.Done(
@@ -203,7 +225,9 @@ fun InstagramProfileBrowserScreen(
                     directLinkStatus = "다운로드가 완료됐어요."
                 },
                 onFailure = { error ->
-                    if (InstagramRateLimit.onFailure(error.message)) {
+                    if (error.message.orEmpty().contains("429") ||
+                        error.message.orEmpty().contains("Too Many Requests", ignoreCase = true)) {
+                        InstagramRateLimit.onMedia429()
                         DiagnosticLog.record(
                             "IG-LINK-429",
                             "Chrome에서 공유한 링크",
@@ -215,7 +239,7 @@ fun InstagramProfileBrowserScreen(
                     )
                     task = TaskState.Failed(
                         title = "링크 저장에 실패했어요",
-                        detail = if (InstagramRateLimit.shouldSkip()) {
+                        detail = if (InstagramRateLimit.shouldSkipMedia()) {
                             "Instagram 서버 요청 제한(429)입니다. 잠시 쉬었다가 다시 시도해 주세요."
                         } else error.message ?: "원본을 가져올 수 없습니다."
                     )
