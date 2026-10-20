@@ -12,6 +12,10 @@ class InstagramMediaLinkTest {
         )!!
         assertEquals("https://www.instagram.com/p/AbCd1234/", result.canonicalUrl)
         assertEquals(InstagramMediaType.POST, result.type)
+        assertEquals(
+            "https://www.instagram.com/p/AbCd1234/embed/captioned/",
+            result.embedUrl
+        )
     }
 
     @Test
