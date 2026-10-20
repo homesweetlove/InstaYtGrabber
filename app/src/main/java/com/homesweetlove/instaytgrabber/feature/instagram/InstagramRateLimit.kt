@@ -11,12 +11,16 @@ object InstagramRateLimit {
     private const val COOLDOWN_MS = 15L * 60L * 1000L
     // Local safety delay only; Instagram controls the real unblock time.
     private const val LOGIN_COOLDOWN_MS = 60L * 60L * 1000L
+    private const val MEDIA_COOLDOWN_MS = 30L * 60L * 1000L
 
     @Volatile
     private var instaloaderBlockedUntil: Long = 0L
 
     @Volatile
     private var loginBlockedUntil: Long = 0L
+
+    @Volatile
+    private var mediaBlockedUntil: Long = 0L
 
     @Volatile
     private var preferences: SharedPreferences? = null
@@ -33,6 +37,10 @@ object InstagramRateLimit {
         loginBlockedUntil = maxOf(
             loginBlockedUntil,
             preferences?.getLong("login_blocked_until", 0L) ?: 0L
+        )
+        mediaBlockedUntil = maxOf(
+            mediaBlockedUntil,
+            preferences?.getLong("media_blocked_until", 0L) ?: 0L
         )
     }
 
@@ -85,10 +93,29 @@ object InstagramRateLimit {
     fun loginRemainingMinutes(now: Long = System.currentTimeMillis()): Long =
         ((loginBlockedUntil - now).coerceAtLeast(0L) + 59_999L) / 60_000L
 
+    // Profile-lookup 429 does not necessarily block a public embed.
+    // A media-endpoint 429 is tracked independently to avoid rapid repeats.
+    @Synchronized
+    fun onMedia429(now: Long = System.currentTimeMillis()) {
+        mediaBlockedUntil = maxOf(mediaBlockedUntil, now + MEDIA_COOLDOWN_MS)
+        preferences?.edit()?.putLong("media_blocked_until", mediaBlockedUntil)?.apply()
+    }
+
+    fun shouldSkipMedia(now: Long = System.currentTimeMillis()): Boolean =
+        now < mediaBlockedUntil
+
+    fun mediaRemainingMinutes(now: Long = System.currentTimeMillis()): Long =
+        ((mediaBlockedUntil - now).coerceAtLeast(0L) + 59_999L) / 60_000L
+
     @Synchronized
     fun resetForTests() {
         instaloaderBlockedUntil = 0L
         loginBlockedUntil = 0L
-        preferences?.edit()?.remove("instaloader_blocked_until")?.remove("login_blocked_until")?.apply()
+        mediaBlockedUntil = 0L
+        preferences?.edit()
+            ?.remove("instaloader_blocked_until")
+            ?.remove("login_blocked_until")
+            ?.remove("media_blocked_until")
+            ?.apply()
     }
 }
