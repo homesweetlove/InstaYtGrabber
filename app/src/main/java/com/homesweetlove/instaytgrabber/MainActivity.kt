@@ -362,7 +362,9 @@ private fun YouTubeScreen(initialUrl: String, header: @Composable () -> Unit) {
             TossButton(
                 text = type.actionLabel,
                 modifier = Modifier.weight(1f),
-                enabled = url.isNotBlank() && !invalidUrl && info != null && !running && !inspecting,
+                enabled = url.isNotBlank() && !invalidUrl &&
+                    (info != null || type == YouTubeMediaType.THUMBNAIL) &&
+                    !running && !inspecting,
                 onClick = {
                     val target = type
                     scope.launch {
