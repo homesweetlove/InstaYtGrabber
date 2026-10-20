@@ -1,5 +1,6 @@
 package com.homesweetlove.instaytgrabber.feature.instagram
 
+import android.webkit.CookieManager
 import com.homesweetlove.instaytgrabber.core.StoragePublisher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -14,7 +15,9 @@ object InstagramDirectFileEngine {
         baseName: String
     ): Result<File> = withContext(Dispatchers.IO) {
         runCatching {
-            require(url.startsWith("https://")) { "HTTPS 미디어 URL이 아닙니다." }
+            require(InstagramMediaUrlPolicy.isAllowed(url)) {
+                "신뢰할 수 있는 Instagram HTTPS 미디어 주소가 아닙니다."
+            }
 
             val connection = URL(url).openConnection() as HttpURLConnection
             var tempDir: File? = null
@@ -27,10 +30,25 @@ object InstagramDirectFileEngine {
                 "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/140.0.0.0 Mobile Safari/537.36"
             )
             connection.setRequestProperty("Referer", "https://www.instagram.com/")
+            connection.setRequestProperty("Accept", "*/*")
+            connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+            connection.setRequestProperty("Range", "bytes=0-")
+            connection.setRequestProperty("Sec-Fetch-Mode", "no-cors")
+            connection.setRequestProperty("Sec-Fetch-Site", "cross-site")
+            val cdnCookies = CookieManager.getInstance().getCookie(url).orEmpty()
+            if (cdnCookies.isNotBlank()) {
+                connection.setRequestProperty("Cookie", cdnCookies)
+            }
             connection.connect()
 
+            // The extracted URL may redirect; reject untrusted final hosts.
+            require(InstagramMediaUrlPolicy.isAllowed(connection.url.toString())) {
+                "Instagram 미디어가 외부 도메인으로 이동했습니다."
+            }
+
             if (connection.responseCode !in 200..299) {
-                error("미디어 요청 실패 · HTTP ${connection.responseCode}")
+                if (connection.responseCode == 429) InstagramRateLimit.onMedia429()
+                error("Instagram CDN 미디어 요청 실패 · HTTP ${connection.responseCode}")
             }
 
             val extension = when (connection.contentType?.substringBefore(";")?.lowercase()) {
