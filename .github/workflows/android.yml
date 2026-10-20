@@ -49,6 +49,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses >/dev/null || true
       - name: Validate Python and QuickJS build script syntax
