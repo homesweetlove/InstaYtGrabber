@@ -60,6 +60,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.homesweetlove.instaytgrabber.core.DiagnosticLog
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramBrowserConfig
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramCatalogItem
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramCatalogSection
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramDirectFileEngine
@@ -1001,11 +1002,8 @@ private fun ProfileInstagramLoginDialog(
                                 // Use the installed Chromium version, omitting
                                 // the embedded WebView token, rather than a stale
                                 // hard-coded Chrome version.
-                                val originalUserAgent = settings.userAgentString
-                                settings.userAgentString = originalUserAgent
-                                    .replace("; wv", "")
-                                    .replace("Version/4.0 ", "")
-                                    .replace(";wv", "")
+                                settings.userAgentString =
+                                    InstagramBrowserConfig.mobileUserAgent(context)
                                 cookieManager.setAcceptThirdPartyCookies(this, true)
 
                                 webChromeClient = object : WebChromeClient() {
