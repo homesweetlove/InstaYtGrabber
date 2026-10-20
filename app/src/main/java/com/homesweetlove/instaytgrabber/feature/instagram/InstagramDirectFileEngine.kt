@@ -51,7 +51,12 @@ object InstagramDirectFileEngine {
                 error("Instagram CDN 미디어 요청 실패 · HTTP ${connection.responseCode}")
             }
 
-            val extension = when (connection.contentType?.substringBefore(";")?.lowercase()) {
+            val mime = connection.contentType?.substringBefore(";")?.lowercase().orEmpty()
+            if (mime.startsWith("text/") || mime.contains("json") || mime.contains("html")) {
+                error("Instagram CDN에서 미디어 대신 " + mime + " 형식을 반환했습니다.")
+            }
+
+            val extension = when (mime) {
                 "image/jpeg" -> "jpg"
                 "image/png" -> "png"
                 "image/webp" -> "webp"
