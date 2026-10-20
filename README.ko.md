@@ -160,3 +160,17 @@ Instagram이 Android 내장 브라우저 로그인을 차단하거나 보안 확
 - GitHub 모바일 앱에서 Actions Artifacts가 보이지 않는 문제를 줄이기 위해 같은 저장소에서 만든 PR 빌드를 `test-pr-1-latest` 같은 테스트용 Releases에도 설치 가능한 `.apk` 파일로 직접 게시합니다. 해당 릴리스는 개발용이며 출시 품질 인증을 뜻하지 않습니다.
 
 HTTP 429가 지속된다면 충분한 시간 동안 접속을 멈춘 뒤 **공식 Instagram 앱이나 일반 브라우저에서도** 같은 현상인지 확인하세요. APK를 바꾸는 것만으로 Instagram 서버 제한을 해제할 수는 없습니다.
+
+
+## v0.3.9: Chrome 로그인 정상 / 앱 내 WebView 제한 대응
+
+Chrome에서는 Instagram 로그인이 가능하지만 앱의 WebView 및 익명 Python 요청에서 HTTP 429가 발생하는 사례를 반영했습니다.
+
+- **Chrome에서 Instagram 열기**: 앱에 아이디를 입력한 뒤 Chrome으로 해당 프로필을 엽니다. Chrome에 이미 로그인했다면 그 세션으로 게시글과 릴스를 탐색할 수 있습니다.
+- **Chrome에서 링크 공유**: Chrome의 공유 메뉴에서 `InstaYtGrabber`를 선택하거나 게시물/릴스 주소를 복사해 앱의 **게시글·릴스 링크 저장** 칸에 붙여넣으세요. `/p/...`, `/reel/...`, `/reels/...` 주소를 식별하고 추적 매개변수를 제거합니다.
+- **Chrome 세션은 Android WebView/Chaquopy에 자동 이전되지 않습니다.** 링크를 공유하는 것은 로그인 세션을 공유하는 것과 다릅니다. 따라서 Instagram이 실제 미디어 요청에 대해 HTTP 429 또는 인증 제한을 내리면 링크 다운로드도 실패할 수 있습니다. 그런 경우 오류 기록에 `IG-LINK-429`/`IG-LINK-DOWNLOAD`를 남깁니다.
+- **세션 쿠키 삭제 방지**: Instagram 게시물 다운로드 전용 WebView의 공개 조회에서도 전체 CookieManager를 비우던 오래된 코드를 제거했습니다.
+- **Android 10+ 다운로드 저장 버그**: gallery-dl이 공용 Downloads에 직접 쓰려고 하던 코드를 수정했습니다. 앱의 임시 디렉터리에서 다운로드를 완료한 뒤 MediaStore를 통해 `Downloads/InstaYtGrabber/Instagram/`에 저장합니다.
+- Chrome 공유 링크 처리의 유효/잘못된 URL 단위 테스트를 추가했습니다. 로그인 성공과 미디어 다운로드 성공은 **실제 휴대폰**에서 각각 확인해야 합니다.
+
+참고: 앱에서 Chrome 브라우저의 로그인 쿠키를 읽거나 Chrome에 표시된 임의의 프로필 목록을 자동 추출하는 기능은 제공하지 않습니다. 계정 정보나 브라우저 보안 경계를 우회하지 않습니다.
