@@ -68,6 +68,7 @@ import com.homesweetlove.instaytgrabber.feature.instagram.InstagramCatalogSectio
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramDirectFileEngine
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramEngine
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramInstaloaderMediaEngine
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramMediaLink
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramMediaType
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramOutputType
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileCatalog
@@ -111,7 +112,10 @@ fun InstagramProfileBrowserScreen(
     initialUrl: String,
     header: @Composable () -> Unit = {}
 ) {
-    var url by remember { mutableStateOf(initialUrl) }
+    val incomingMedia = remember(initialUrl) { InstagramMediaLink.parse(initialUrl) }
+    var url by remember { mutableStateOf(if (incomingMedia == null) initialUrl else "") }
+    var directLink by remember { mutableStateOf(incomingMedia?.canonicalUrl.orEmpty()) }
+    var directLinkStatus by remember { mutableStateOf("") }
     var resolvedProfileUrl by remember { mutableStateOf("") }
     var section by remember { mutableStateOf(InstagramSection.POST) }
     var profile by remember { mutableStateOf<InstagramProfileCatalog?>(null) }
@@ -130,6 +134,97 @@ fun InstagramProfileBrowserScreen(
     var loggedIn by remember { mutableStateOf(InstagramSession.isLoggedIn()) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    fun openProfileInChrome() {
+        val target = runCatching {
+            if (url.isNotBlank()) InstagramProfileInput.normalize(url)
+            else "https://www.instagram.com/"
+        }.getOrElse { error ->
+            DiagnosticLog.failure("IG-CHROME-INPUT", "Chrome 프로필 주소", error)
+            status = "프로필 아이디가 올바르지 않습니다."
+            return
+        }
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(target))
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+            .setPackage("com.android.chrome")
+        runCatching {
+            try {
+                context.startActivity(intent)
+            } catch (_: android.content.ActivityNotFoundException) {
+                intent.setPackage(null)
+                context.startActivity(intent)
+            }
+        }.onFailure {
+            DiagnosticLog.failure("IG-CHROME-OPEN", "Chrome에서 열기", it)
+            directLinkStatus = "Chrome을 열지 못했어요."
+        }
+    }
+
+    fun downloadDirectLink() {
+        val media = InstagramMediaLink.parse(directLink)
+        if (media == null) {
+            directLinkStatus = "Instagram 게시글 또는 릴스 링크를 입력해 주세요."
+            DiagnosticLog.record("IG-LINK-INPUT", "Chrome 공유 링크", "올바르지 않은 게시글 또는 릴스 주소")
+            return
+        }
+        if (InstagramRateLimit.shouldSkip() && !InstagramSession.isLoggedIn()) {
+            directLinkStatus = "Instagram에서 429 요청 제한이 발생했습니다. " +
+                "이 앱의 자동 요청을 잠시 중단했습니다. 서버 제한이 풀린 후 시도해 주세요."
+            return
+        }
+        scope.launch {
+            downloading = true
+            directLinkStatus = ""
+            task = TaskState.Running(
+                title = media.type.label + " 저장 중",
+                detail = "원본 미디어 정보를 확인하고 있어요",
+                progress = 0f
+            )
+            val result = InstagramEngine.download(
+                url = media.canonicalUrl,
+                type = media.type,
+                output = InstagramOutputType.MEDIA,
+                allowAuthenticatedFallback = InstagramSession.isLoggedIn(),
+                onProgress = { progress ->
+                    task = TaskState.Running(
+                        title = media.type.label + " 저장 중",
+                        detail = progress.line,
+                        progress = (progress.percent / 100f).coerceIn(0f, 1f)
+                    )
+                }
+            )
+            result.fold(
+                onSuccess = {
+                    task = TaskState.Done(
+                        title = "저장 요청 완료",
+                        detail = "다운로드 폴더를 확인해 주세요.",
+                        location = "다운로드 › InstaYtGrabber › Instagram"
+                    )
+                    directLinkStatus = "다운로드가 완료됐어요."
+                },
+                onFailure = { error ->
+                    if (InstagramRateLimit.onFailure(error.message)) {
+                        DiagnosticLog.record(
+                            "IG-LINK-429",
+                            "Chrome에서 공유한 링크",
+                            "Instagram 서버에서 HTTP 429 제한이 발생해 요청을 중단했습니다."
+                        )
+                    }
+                    DiagnosticLog.failure(
+                        "IG-LINK-DOWNLOAD", "Chrome에서 공유한 " + media.type.label, error
+                    )
+                    task = TaskState.Failed(
+                        title = "링크 저장에 실패했어요",
+                        detail = if (InstagramRateLimit.shouldSkip()) {
+                            "Instagram 서버 요청 제한(429)입니다. 잠시 쉬었다가 다시 시도해 주세요."
+                        } else error.message ?: "원본을 가져올 수 없습니다."
+                    )
+                    directLinkStatus = "실패했어요. 오류 기록을 확인해 주세요."
+                }
+            )
+            downloading = false
+        }
+    }
 
     fun sectionItems(target: InstagramSection): List<InstagramCatalogItem> =
         when (target) {
