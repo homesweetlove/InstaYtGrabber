@@ -60,6 +60,7 @@ import com.homesweetlove.instaytgrabber.feature.instagram.InstagramMediaType
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramOutputType
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileCatalog
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileCatalogEngine
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileInput
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramSession
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramWebMediaEngine
 import com.homesweetlove.instaytgrabber.ui.BottomCta
@@ -98,6 +99,7 @@ fun InstagramProfileBrowserScreen(
     header: @Composable () -> Unit = {}
 ) {
     var url by remember { mutableStateOf(initialUrl) }
+    var resolvedProfileUrl by remember { mutableStateOf("") }
     var section by remember { mutableStateOf(InstagramSection.STORY) }
     var profile by remember { mutableStateOf<InstagramProfileCatalog?>(null) }
     var stories by remember { mutableStateOf<List<InstagramCatalogItem>>(emptyList()) }
@@ -138,7 +140,7 @@ fun InstagramProfileBrowserScreen(
 
             InstagramProfileCatalogEngine.loadSection(
                 context = context,
-                profileUrl = url,
+                profileUrl = resolvedProfileUrl.ifBlank { url },
                 section = target.catalogSection,
                 isPrivate = current.isPrivate,
                 onProgress = { count ->
@@ -168,6 +170,13 @@ fun InstagramProfileBrowserScreen(
 
     fun loadProfile() {
         scope.launch {
+            val canonicalUrl = runCatching { InstagramProfileInput.normalize(url) }
+                .getOrElse { error ->
+                    DiagnosticLog.failure("IG-INPUT-01", "프로필 아이디 확인", error)
+                    status = "아이디 확인 실패 · " + (error.message ?: "입력을 확인해 주세요.")
+                    return@launch
+                }
+            resolvedProfileUrl = canonicalUrl
             baseLoading = true
             profile = null
             stories = emptyList()
@@ -180,7 +189,7 @@ fun InstagramProfileBrowserScreen(
             section = InstagramSection.STORY
             status = "프로필 정보 불러오는 중…"
 
-            InstagramProfileCatalogEngine.loadBase(context, url).fold(
+            InstagramProfileCatalogEngine.loadBase(context, canonicalUrl).fold(
                 onSuccess = { loaded ->
                     profile = loaded
                     status = "@" + loaded.username + " 프로필 불러옴"
@@ -347,11 +356,11 @@ fun InstagramProfileBrowserScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     TossCard {
-                        SectionTitle("프로필 링크")
+                        SectionTitle("프로필 아이디 또는 링크")
                         TossTextField(
                             value = url,
                             onValueChange = { url = it },
-                            placeholder = "instagram.com/username",
+                            placeholder = "아이디 · @아이디 · instagram.com/아이디",
                             enabled = !baseLoading && !downloading
                         )
                         TossButton(
