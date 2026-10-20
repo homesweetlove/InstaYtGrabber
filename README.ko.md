@@ -174,3 +174,28 @@ Chrome에서는 Instagram 로그인이 가능하지만 앱의 WebView 및 익명
 - Chrome 공유 링크 처리의 유효/잘못된 URL 단위 테스트를 추가했습니다. 로그인 성공과 미디어 다운로드 성공은 **실제 휴대폰**에서 각각 확인해야 합니다.
 
 참고: 앱에서 Chrome 브라우저의 로그인 쿠키를 읽거나 Chrome에 표시된 임의의 프로필 목록을 자동 추출하는 기능은 제공하지 않습니다. 계정 정보나 브라우저 보안 경계를 우회하지 않습니다.
+
+
+## v0.4.0: 다른 Android 다운로더 구조 참고 후 미디어 엔진 재설계
+
+실제 기기에서 Instagram Chrome 로그인은 정상인데 Instaloader 프로필 조회는 `web_profile_info` 429를 반환했습니다. 기존 앱에는 게시물 다운로드조차 **Instagram 홈을 열고 `history.pushState`로 URL만 바꾸는 오류**가 남아 있어, 이 경로는 실제 게시물 데이터를 로드하지 못했습니다.
+
+### 참고 구현 및 차이
+
+- [Flipper the Ripper](https://github.com/pepperonas/flipper-the-ripper) (MIT, `WebViewExtractor.kt`, `WebViewYtDlpEngine.kt`): 실제 릴스 embed 웹페이지 로드, 비디오 요청/CDN 미디어 주소 감지, 원본 요청 헤더 활용. **아이디어를 참고하여 별도 Kotlin 구현을 작성**했습니다.
+- [InstaDownload](https://github.com/Orang-Studio/InstaDownload) (GPL-3.0): 프로필 전체 조회와 개별 게시물 URL 조회를 분리하고, 공개 페이지에 포함된 JSON에서 해당 shortcode 미디어 데이터를 식별. GPL 코드를 복사하지 않고 구조만 참고했습니다.
+- [gallery-dl](https://github.com/mikf/gallery-dl) (GPL-2.0) 및 [yt-dlp Instagram extractor](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/instagram.py): Instagram은 익명 API 및 웹 페이지 요청을 제한할 수 있으므로 개별 미디어 링크와 프로필 API 요청을 별도로 다뤄야 합니다.
+
+### 변경 사항
+
+1. 링크 저장은 `https://www.instagram.com/p/<code>/embed/captioned/` 또는 `/reel/<code>/embed/captioned/` **실제 페이지를 WebView로 열어** 해당 미디어를 찾습니다. 홈 페이지에서 주소만 바꾸는 가짜 라우팅은 제거했습니다.
+2. 단일 미디어는 프로필 조회용 `web_profile_info` 엔드포인트를 **선행 호출하지 않습니다**. 웹페이지 DOM·embed JSON·브라우저에 표시된 비디오 CDN 요청을 수집하고, 실패 시 한 번만 기존 gallery-dl을 폴백합니다.
+3. 직접 가져온 미디어 URL은 Instagram CDN 도메인(Instagram, cdninstagram, fbcdn) 및 HTTPS인지 검증하고, 실제 브라우저의 Referer/Range/쿠키(해당 CDN 도메인의 쿠키) 등을 활용해 저장을 시도합니다. HTML/JSON 오류 응답은 미디어 파일로 저장하지 않습니다.
+4. 프로필 API 429와 **개별 미디어 HTTP 429 대기**는 구분합니다. 미디어에 직접 429가 오면 30분 동안 같은 미디어 시도를 막습니다. 앱의 대기 시간은 서버 제한 해제를 보장하지 않습니다.
+5. Chrome에서 공유한 게시글·릴스 링크 저장을 첫 화면에 배치하고, 프로필 ID로 전체 목록 가져오기는 별도의 **실험적** 기능으로 명시했습니다.
+
+### 한계
+
+- Chrome 쿠키를 앱으로 자동 복사하지 않습니다. Android 내장 WebView에서 Instagram 로그인이 차단될 수 있고, 공개 미디어 embed 요청도 HTTP 429나 로그인을 요구할 수 있습니다.
+- 실제 릴스 원본 다운로드, 사진 여러 장, 하이라이트·스토리 및 프로필 전체 목록 **성공은 아직 실기기에서 확인해야 합니다**. 테스트 빌드 성공은 Instagram 서버 접근 성공을 의미하지 않습니다.
+- 다수 게시물 자동 수집이나 보안 제한 우회 대신 **링크 하나씩 다운로드**를 우선 검증합니다.
