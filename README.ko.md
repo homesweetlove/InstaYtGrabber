@@ -115,3 +115,15 @@ GitHub Actions는 `main` push 시 debug APK를 빌드하고, 성공하면 [GitHu
 - 앱을 삭제하면 로그도 삭제됩니다. 로그는 다운로드한 미디어나 다운로드 내역을 저장하지 않습니다.
 
 **Instagram 웹 프로필 폴백**은 홈에서 주소만 바꾸는 방식에서 실제 프로필 페이지로 이동하는 방식으로 변경되었습니다. 실기기에서 다시 확인해야 합니다.
+
+### 프로필 아이디 직접 입력 (v0.3.5)
+
+Instagram 탭의 **프로필 아이디 또는 링크** 입력란은 다음 형태를 모두 지원합니다.
+
+- `example_user`
+- `@example_user`
+- `instagram.com/example_user`
+- `https://www.instagram.com/example_user/?utm_source=share`
+
+앱은 모두 `https://www.instagram.com/example_user/`로 변환해 프로필을 조회합니다.
+게시글/릴스 링크와 Instagram 외 사이트는 프로필 검색에서 거부하며, 잘못된 입력은 `IG-INPUT-01` 오류 코드로 기록합니다.
