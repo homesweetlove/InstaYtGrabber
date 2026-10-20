@@ -312,6 +312,7 @@ private fun YouTubeScreen(initialUrl: String, header: @Composable () -> Unit) {
                                         inspectStatus = "조회 완료"
                                     },
                                     onFailure = {
+                                        DiagnosticLog.failure("YT-INSPECT-01", "YouTube 정보 조회", it)
                                         inspectError = it.message ?: it.javaClass.simpleName
                                         inspectStatus = ""
                                     }
@@ -422,6 +423,7 @@ private fun YouTubeScreen(initialUrl: String, header: @Composable () -> Unit) {
                                 )
                             },
                             onFailure = {
+                                DiagnosticLog.failure("YT-DOWNLOAD-01", "YouTube / " + target.name, it)
                                 TaskState.Failed(
                                     title = "저장하지 못했어요",
                                     detail = it.message ?: it.javaClass.simpleName
