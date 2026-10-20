@@ -1,5 +1,6 @@
 package com.homesweetlove.instaytgrabber.feature.youtube
 
+import android.graphics.BitmapFactory
 import com.homesweetlove.instaytgrabber.core.GrabProgress
 import com.homesweetlove.instaytgrabber.core.StoragePublisher
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +56,15 @@ object YouTubeThumbnailEngine {
                             }
                         }
                         if (target.length() > 0L) {
+                            // Missing high-resolution thumbnails may be tiny
+                            // placeholder JPEGs returned with HTTP 200.
+                            val bounds = BitmapFactory.Options().apply {
+                                inJustDecodeBounds = true
+                            }
+                            BitmapFactory.decodeFile(target.absolutePath, bounds)
+                            if (bounds.outWidth < 320 || bounds.outHeight < 180) {
+                                continue
+                            }
                             val published = StoragePublisher.publishFiles(
                                 files = listOf(target),
                                 relativeFolder = folder
