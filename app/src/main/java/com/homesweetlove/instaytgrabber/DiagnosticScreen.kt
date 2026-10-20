@@ -93,7 +93,7 @@ fun DiagnosticScreen(onClose: () -> Unit) {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(Toss.White, RoundedCornerShape(16.dp))
+                                    .background(Toss.Card, RoundedCornerShape(16.dp))
                                     .padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
