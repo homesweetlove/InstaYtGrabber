@@ -153,10 +153,15 @@ def base(profile_url, cookie_header=""):
 
 def section(profile_url, section_name, cookie_header=""):
     try:
+        section_name = (section_name or "").lower()
+        # Do not request web_profile_info for anonymous stories/highlights;
+        # it is unnecessary, commonly rate-limited, and cannot make the
+        # unauthenticated request succeed.
+        if section_name in {"stories", "highlights"} and not cookie_header:
+            raise RuntimeError("스토리·하이라이트 조회를 위해 Instagram 로그인을 연결해 주세요.")
         username = _username(profile_url)
         loader = _loader(cookie_header)
         profile = instaloader.Profile.from_username(loader.context, username)
-        section_name = (section_name or "").lower()
         items = []
 
         if section_name == "posts":
