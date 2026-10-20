@@ -70,7 +70,13 @@ object InstagramRateLimit {
             ?.times(1000L)
             ?: LOGIN_COOLDOWN_MS
         loginBlockedUntil = maxOf(loginBlockedUntil, now + duration)
-        preferences?.edit()?.putLong("login_blocked_until", loginBlockedUntil)?.apply()
+        // Login and public API requests use the same Instagram service.
+        // A 429 from login is a reason to stop anonymous API probing too.
+        instaloaderBlockedUntil = maxOf(instaloaderBlockedUntil, loginBlockedUntil)
+        preferences?.edit()
+            ?.putLong("login_blocked_until", loginBlockedUntil)
+            ?.putLong("instaloader_blocked_until", instaloaderBlockedUntil)
+            ?.apply()
     }
 
     fun shouldSkipLogin(now: Long = System.currentTimeMillis()): Boolean =
