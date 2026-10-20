@@ -1,5 +1,8 @@
 package com.homesweetlove.instaytgrabber.feature.instagram
 
+import android.content.Context
+import android.content.SharedPreferences
+
 /**
  * Client-side safety guard: 429 responses should not cause repeated rapid API
  * calls from one device. Does not bypass any Instagram authentication controls.
@@ -10,6 +13,20 @@ object InstagramRateLimit {
     @Volatile
     private var instaloaderBlockedUntil: Long = 0L
 
+    @Volatile
+    private var preferences: SharedPreferences? = null
+
+    @Synchronized
+    fun attach(context: Context) {
+        preferences = context.applicationContext.getSharedPreferences(
+            "instagram_rate_limits", Context.MODE_PRIVATE
+        )
+        instaloaderBlockedUntil = maxOf(
+            instaloaderBlockedUntil,
+            preferences?.getLong("instaloader_blocked_until", 0L) ?: 0L
+        )
+    }
+
     @Synchronized
     fun onFailure(message: String?, now: Long = System.currentTimeMillis()): Boolean {
         val text = message.orEmpty()
@@ -17,6 +34,9 @@ object InstagramRateLimit {
             .containsMatchIn(text)
         if (rateLimited) {
             instaloaderBlockedUntil = maxOf(instaloaderBlockedUntil, now + COOLDOWN_MS)
+            preferences?.edit()?.putLong(
+                "instaloader_blocked_until", instaloaderBlockedUntil
+            )?.apply()
         }
         return rateLimited
     }
@@ -30,5 +50,6 @@ object InstagramRateLimit {
     @Synchronized
     fun resetForTests() {
         instaloaderBlockedUntil = 0L
+        preferences?.edit()?.remove("instaloader_blocked_until")?.apply()
     }
 }
