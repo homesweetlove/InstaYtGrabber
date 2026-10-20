@@ -20,6 +20,7 @@ class GrabberApp : Application() {
             Python.start(AndroidPlatform(this))
         }
 
+        DiagnosticLog.attach(this)
         StoragePublisher.attach(this)
         YtDlpRuntime.attach(this)
     }
