@@ -1,5 +1,7 @@
 package com.homesweetlove.instaytgrabber
 
+import android.content.Intent
+import android.net.Uri
 import android.net.http.SslError
 import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
@@ -71,6 +73,7 @@ import com.homesweetlove.instaytgrabber.feature.instagram.InstagramOutputType
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileCatalog
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileCatalogEngine
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileInput
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramRateLimit
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramSession
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramWebMediaEngine
 import com.homesweetlove.instaytgrabber.ui.BottomCta
@@ -917,6 +920,8 @@ private fun ProfileInstagramLoginDialog(
     var errorStatus by remember { mutableStateOf("") }
     var retryKey by remember { mutableIntStateOf(0) }
     var signedIn by remember { mutableStateOf(false) }
+    var loginBlocked by remember { mutableStateOf(InstagramRateLimit.shouldSkipLogin()) }
+    val context = LocalContext.current
     val loginUrl = "https://www.instagram.com/accounts/login/"
 
     Dialog(
@@ -963,11 +968,21 @@ private fun ProfileInstagramLoginDialog(
                         color = if (errorStatus.isBlank()) Toss.Text3 else Toss.Red,
                         modifier = Modifier.weight(1f)
                     )
-                    ToolbarAction("새로고침", true) {
-                        errorStatus = ""
-                        loading = true
-                        progress = 0
-                        retryKey++
+                    ToolbarAction("새로고침", !loginBlocked) {
+                        if (!InstagramRateLimit.shouldSkipLogin()) {
+                            errorStatus = ""
+                            loading = true
+                            progress = 0
+                            retryKey++
+                        } else {
+                            loginBlocked = true
+                        }
+                    }
+                    ToolbarAction("상태 확인", true) {
+                        loginBlocked = InstagramRateLimit.shouldSkipLogin()
+                        if (!loginBlocked && errorStatus.contains("429")) {
+                            errorStatus = "대기 시간이 끝났습니다. 새로고침은 한 번만 시도해 주세요."
+                        }
                     }
                     ToolbarAction("세션 확인", true) {
                         if (InstagramSession.captureFromWebView()) {
@@ -984,7 +999,22 @@ private fun ProfileInstagramLoginDialog(
                 // The WebView has to be a real, visible browser, not the hidden
                 // Instagram media-extraction WebView. The system WebView UA has
                 // a "; wv" marker which Instagram may respond to with a blank page.
-                key(retryKey) {
+                if (loginBlocked) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().weight(1f).padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "Instagram 서버가 로그인 화면 요청을 제한했습니다 (HTTP 429). " +
+                                "앱은 추가 로그인 요청을 중단했습니다. " +
+                                "최소 " + InstagramRateLimit.loginRemainingMinutes() +
+                                "분간 기다린 뒤 상태 확인을 눌러 주세요. " +
+                                "실제 제한 해제 시각은 Instagram에서 결정합니다.",
+                            style = TossType.BodyRegular,
+                            color = Toss.Text2
+                        )
+                    }
+                } else key(retryKey) {
                     AndroidView(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1019,6 +1049,7 @@ private fun ProfileInstagramLoginDialog(
                                     }
 
                                     override fun onPageFinished(view: WebView, url: String?) {
+                                        if (loginBlocked) return
                                         cookieManager.flush()
                                         loading = false
                                         progress = 100
@@ -1059,7 +1090,20 @@ private fun ProfileInstagramLoginDialog(
                                     ) {
                                         if (!request.isForMainFrame) return
                                         val code = response.statusCode
-                                        errorStatus = "Instagram 서버 응답 오류: HTTP " + code
+                                        if (code == 429) {
+                                            val retryAfter = response.responseHeaders?.entries
+                                                ?.firstOrNull { it.key.equals("Retry-After", true) }
+                                                ?.value?.trim()?.toLongOrNull()
+                                            InstagramRateLimit.onLoginHttp429(retryAfter)
+                                            loginBlocked = true
+                                            loading = false
+                                        }
+                                        errorStatus = if (code == 429) {
+                                            "Instagram에서 로그인 요청을 제한했습니다 (HTTP 429). " +
+                                                "반복 접속을 중단하고 나중에 다시 시도해 주세요."
+                                        } else {
+                                            "Instagram 서버 응답 오류: HTTP " + code
+                                        }
                                         DiagnosticLog.record(
                                             "IG-LOGIN-HTTP-" + code,
                                             "Instagram 로그인 화면",
@@ -1124,9 +1168,27 @@ private fun ProfileInstagramLoginDialog(
                         }
                     )
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    ToolbarAction("외부에서 Instagram 상태 확인", true) {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(loginUrl))
+                                    .addCategory(Intent.CATEGORY_BROWSABLE)
+                            )
+                        }.onFailure {
+                            DiagnosticLog.failure(
+                                "IG-LOGIN-EXTERNAL", "Instagram 외부 페이지 확인", it
+                            )
+                        }
+                    }
+                }
                 Text(
-                    "Instagram에서 웹 로그인을 제한하면 접속할 수 없을 수 있습니다. " +
-                        "세션 정보는 기기에만 보관합니다. 로그인되지 않은 상태에서 세션 확인을 눌러도 연결하지 않습니다.",
+                    "외부 브라우저에서 페이지가 열리는지 비교할 수 있습니다. " +
+                        "외부 브라우저 로그인은 이 앱에 자동 연결되지 않습니다. " +
+                        "429가 나타나면 재시도를 멈추고 기다려 주세요.",
                     style = TossType.Caption,
                     color = Toss.Text3,
                     modifier = Modifier.padding(12.dp)
