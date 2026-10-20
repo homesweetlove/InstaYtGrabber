@@ -56,6 +56,13 @@ object InstagramProfileCatalogEngine {
         context: Context,
         profileUrl: String
     ): Result<InstagramProfileCatalog> {
+        if (InstagramRateLimit.shouldSkip() && !InstagramSession.isLoggedIn()) {
+            return Result.failure(IllegalStateException(
+                "Instagram 요청 제한(429)으로 자동 조회를 잠시 중단했습니다. 약 " +
+                    InstagramRateLimit.remainingMinutes() +
+                    "분 뒤 다시 시도하거나, 로그인 페이지가 열리는지 먼저 확인해 주세요."
+            ))
+        }
         val skipInstaloader = InstagramRateLimit.shouldSkip()
         val instaloader = if (skipInstaloader) {
             Result.failure(IllegalStateException(
@@ -70,6 +77,13 @@ object InstagramProfileCatalogEngine {
         if (instaloader.isSuccess) return instaloader
         if (!skipInstaloader) {
             logFailure("IG-BASE-01", "익명 프로필 / Instaloader", instaloader)
+        }
+
+        if (InstagramRateLimit.shouldSkip() && !InstagramSession.isLoggedIn()) {
+            return Result.failure(IllegalStateException(
+                "Instagram 요청 제한(429): 자동 재요청을 멈췄습니다. " +
+                    InstagramRateLimit.remainingMinutes() + "분 뒤 다시 시도해 주세요."
+            ))
         }
 
         val browser = InstagramWebCatalogEngine.loadBase(
@@ -161,6 +175,12 @@ object InstagramProfileCatalogEngine {
         onProgress: (Int) -> Unit = {}
     ): Result<List<InstagramCatalogItem>> {
         val sessionCookie = InstagramSession.cookie().orEmpty()
+        if (InstagramRateLimit.shouldSkip() && sessionCookie.isBlank()) {
+            return Result.failure(IllegalStateException(
+                "Instagram 요청 제한(429): 자동 조회가 잠시 중단됐습니다. 약 " +
+                    InstagramRateLimit.remainingMinutes() + "분 뒤 시도해 주세요."
+            ))
+        }
         val isSessionOnly = section == InstagramCatalogSection.STORIES ||
             section == InstagramCatalogSection.HIGHLIGHTS
         if (isSessionOnly && sessionCookie.isBlank()) {
@@ -256,6 +276,13 @@ object InstagramProfileCatalogEngine {
                     return Result.success(it)
                 }
             }
+        }
+
+        if (InstagramRateLimit.shouldSkip() && sessionCookie.isBlank()) {
+            return Result.failure(IllegalStateException(
+                "Instagram 요청 제한(429): 잠시 자동 요청을 멈췄습니다. 약 " +
+                    InstagramRateLimit.remainingMinutes() + "분 뒤 다시 시도해 주세요."
+            ))
         }
 
         if (section == InstagramCatalogSection.POSTS ||
