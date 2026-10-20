@@ -41,18 +41,36 @@ enum class InstagramCatalogSection(val wireName: String) {
 
 object InstagramProfileCatalogEngine {
     private fun logFailure(code: String, stage: String, result: Result<*>) {
-        result.exceptionOrNull()?.let { DiagnosticLog.failure(code, stage, it) }
+        result.exceptionOrNull()?.let {
+            if (stage.contains("Instaloader") && InstagramRateLimit.onFailure(it.message)) {
+                DiagnosticLog.record(
+                    "IG-RATE-429", "Instagram 요청 제한",
+                    "Instaloader에서 429 응답을 받았습니다. 15분 동안 같은 엔진 호출을 중단합니다."
+                )
+            }
+            DiagnosticLog.failure(code, stage, it)
+        }
     }
 
     suspend fun loadBase(
         context: Context,
         profileUrl: String
     ): Result<InstagramProfileCatalog> {
-        val instaloader = withContext(Dispatchers.IO) {
-            runCatching { callInstaloaderBase(profileUrl, "") }
+        val skipInstaloader = InstagramRateLimit.shouldSkip()
+        val instaloader = if (skipInstaloader) {
+            Result.failure(IllegalStateException(
+                "Instagram 요청 제한 대기 중: 약 " +
+                    InstagramRateLimit.remainingMinutes() + "분 남음"
+            ))
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching { callInstaloaderBase(profileUrl, "") }
+            }
         }
         if (instaloader.isSuccess) return instaloader
-        logFailure("IG-BASE-01", "익명 프로필 / Instaloader", instaloader)
+        if (!skipInstaloader) {
+            logFailure("IG-BASE-01", "익명 프로필 / Instaloader", instaloader)
+        }
 
         val browser = InstagramWebCatalogEngine.loadBase(
             context = context,
@@ -76,11 +94,18 @@ object InstagramProfileCatalogEngine {
 
         val sessionCookie = InstagramSession.cookie().orEmpty()
         if (sessionCookie.isNotBlank()) {
-            val authenticatedInstaloader = withContext(Dispatchers.IO) {
-                runCatching { callInstaloaderBase(profileUrl, sessionCookie) }
+            val skipAuthenticatedInstaloader = InstagramRateLimit.shouldSkip()
+            val authenticatedInstaloader = if (skipAuthenticatedInstaloader) {
+                Result.failure(IllegalStateException("Instagram 요청 제한 대기 중"))
+            } else {
+                withContext(Dispatchers.IO) {
+                    runCatching { callInstaloaderBase(profileUrl, sessionCookie) }
+                }
             }
             if (authenticatedInstaloader.isSuccess) return authenticatedInstaloader
-            logFailure("IG-BASE-04", "로그인 프로필 / Instaloader", authenticatedInstaloader)
+            if (!skipAuthenticatedInstaloader) {
+                logFailure("IG-BASE-04", "로그인 프로필 / Instaloader", authenticatedInstaloader)
+            }
 
             val authenticatedBrowser = InstagramWebCatalogEngine.loadBase(
                 context = context,
@@ -136,6 +161,16 @@ object InstagramProfileCatalogEngine {
         onProgress: (Int) -> Unit = {}
     ): Result<List<InstagramCatalogItem>> {
         val sessionCookie = InstagramSession.cookie().orEmpty()
+        val isSessionOnly = section == InstagramCatalogSection.STORIES ||
+            section == InstagramCatalogSection.HIGHLIGHTS
+        if (isSessionOnly && sessionCookie.isBlank()) {
+            return Result.failure(
+                IllegalStateException(
+                    section.wireName + "는 Instagram 로그인 연결 후 조회할 수 있습니다. " +
+                        "계정이 비공개라는 뜻은 아닙니다."
+                )
+            )
+        }
         val sessionPreferred =
             section == InstagramCatalogSection.STORIES ||
                 section == InstagramCatalogSection.HIGHLIGHTS ||
@@ -145,6 +180,11 @@ object InstagramProfileCatalogEngine {
         var sawEmptySuccess = false
 
         suspend fun tryInstaloader(cookie: String, label: String): List<InstagramCatalogItem>? {
+            if (InstagramRateLimit.shouldSkip()) {
+                attempts += label + ": 429 요청 제한으로 " +
+                    InstagramRateLimit.remainingMinutes() + "분간 대기"
+                return null
+            }
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     callInstaloaderSection(
@@ -157,6 +197,12 @@ object InstagramProfileCatalogEngine {
 
             result.onFailure {
                 attempts += label + ": " + (it.message ?: it.javaClass.simpleName)
+                if (InstagramRateLimit.onFailure(it.message)) {
+                    DiagnosticLog.record(
+                        "IG-RATE-429", "Instagram 요청 제한",
+                        "Instaloader에서 429 응답을 받았습니다. 15분 동안 같은 엔진 호출을 중단합니다."
+                    )
+                }
                 DiagnosticLog.failure("IG-SEC-I-" + section.wireName, label, it)
             }
 
