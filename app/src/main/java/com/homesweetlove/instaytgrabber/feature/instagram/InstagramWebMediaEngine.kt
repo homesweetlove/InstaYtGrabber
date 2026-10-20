@@ -240,7 +240,7 @@ object InstagramWebMediaEngine {
                 ) {
                     if (!request.isForMainFrame) return
                     if (errorResponse.statusCode == 429) {
-                        InstagramRateLimit.onFailure("HTTP 429")
+                        InstagramRateLimit.onMedia429()
                     }
                     fail("Instagram 미디어 페이지 HTTP " + errorResponse.statusCode)
                 }
