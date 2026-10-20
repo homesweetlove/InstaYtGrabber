@@ -442,28 +442,31 @@ object InstagramWebCatalogEngine {
         root.addView(webView, 0, FrameLayout.LayoutParams(1080, 2200))
     }
 
-    private suspend fun prepareCookies(authenticated: Boolean) {
+    /**
+     * All WebViews share the application's CookieManager. Never clear its cookies
+     * during an anonymous lookup: doing so would also log the user out of the
+     * Instagram WebView login screen and cause repeated login prompts.
+     *
+     * A request made after sign-in may use the existing browser session even
+     * when authenticated=false; avoiding account-session destruction is safer
+     * than pretending this shared cookie jar can provide isolated guest mode.
+     */
+    private fun prepareCookies(authenticated: Boolean) {
         val manager = CookieManager.getInstance()
-
-        suspendCancellableCoroutine<Unit> { cont ->
-            manager.removeAllCookies {
-                if (authenticated) {
-                    InstagramSession.cookie()
-                        .orEmpty()
-                        .split(";")
-                        .map { value -> value.trim() }
-                        .filter { value -> value.contains("=") }
-                        .forEach { cookie ->
-                            manager.setCookie(
-                                "https://www.instagram.com",
-                                cookie + "; Domain=.instagram.com; Path=/; Secure"
-                            )
-                        }
-                    manager.flush()
+        manager.setAcceptCookie(true)
+        if (authenticated) {
+            InstagramSession.cookie()
+                .orEmpty()
+                .split(";")
+                .map { it.trim() }
+                .filter { it.contains("=") }
+                .forEach { cookie ->
+                    manager.setCookie(
+                        "https://www.instagram.com",
+                        cookie + "; Domain=.instagram.com; Path=/; Secure"
+                    )
                 }
-
-                if (cont.isActive) cont.resume(Unit)
-            }
+            manager.flush()
         }
     }
 
