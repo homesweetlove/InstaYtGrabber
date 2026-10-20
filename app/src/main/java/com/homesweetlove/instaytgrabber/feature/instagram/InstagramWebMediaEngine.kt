@@ -111,6 +111,7 @@ object InstagramWebMediaEngine {
 
             var finished = false
             var routed = false
+            var interceptedVideoUrl: String? = null
 
             fun cleanup() {
                 runCatching { root.removeView(webView) }
@@ -162,7 +163,14 @@ object InstagramWebMediaEngine {
                                         )
                                     )
                                 }
-                            }.distinctBy { it.url }
+                            }.distinctBy { it.url }.let { extracted ->
+                                if (mediaLink.type != InstagramMediaType.REEL) extracted
+                                else extracted.filter { it.isVideo }
+                            }.ifEmpty {
+                                interceptedVideoUrl?.let { video ->
+                                    listOf(InstagramResolvedMedia(video, true))
+                                } ?: emptyList()
+                            }
                         }.fold(
                             onSuccess = { items ->
                                 finished = true
@@ -184,6 +192,23 @@ object InstagramWebMediaEngine {
 
             webView.addJavascriptInterface(Bridge(), "IYGMediaBridge")
             webView.webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest
+                ): WebResourceResponse? {
+                    val url = request.url.toString()
+                    if (url.contains(".mp4", ignoreCase = true) &&
+                        InstagramMediaUrlPolicy.isAllowed(url)
+                    ) {
+                        webView.post {
+                            if (!finished && interceptedVideoUrl == null) {
+                                interceptedVideoUrl = url
+                            }
+                        }
+                    }
+                    return super.shouldInterceptRequest(view, request)
+                }
+
                 override fun onPageFinished(view: WebView, url: String) {
                     if (finished || routed) return
                     routed = true
@@ -192,11 +217,18 @@ object InstagramWebMediaEngine {
                         fail("Instagram이 이 미디어에 로그인 또는 추가 인증을 요구했습니다.")
                         return
                     }
+                    if (!url.contains(route)) {
+                        fail("Instagram이 게시물 embed 페이지 대신 다른 페이지로 이동했습니다.")
+                        return
+                    }
                     // Render/embed hydration takes time; execute collector on
                     // the actual media page rather than falsifying its URL.
                     view.postDelayed({
                         if (!finished && view.url.orEmpty().contains(route)) {
-                            view.evaluateJavascript(collectorScript(), null)
+                            view.evaluateJavascript(
+                                collectorScript(expectVideo = mediaLink.type == InstagramMediaType.REEL),
+                                null
+                            )
                         }
                     }, 1000L)
                 }
@@ -232,10 +264,11 @@ object InstagramWebMediaEngine {
         }
     }
 
-    private fun collectorScript(): String =
+    private fun collectorScript(expectVideo: Boolean): String =
         """
         (() => {
           const items = new Map();
+          const expectVideo = $expectVideo;
 
           function add(url, video) {
             if (!url || typeof url !== 'string') return;
@@ -265,19 +298,27 @@ object InstagramWebMediaEngine {
               '';
             add(videoMeta, true);
 
-            document.querySelectorAll('article video, main video').forEach((video) => {
-              const url = video.currentSrc || video.src || '';
-              add(url, true);
+            document.querySelectorAll('video').forEach((video) => {
+              // Only attempt the page's own video. The browser may resolve its
+              // CDN URL after media playback is initialized.
+              if (video.paused) {
+                video.muted = true;
+                try { video.play()?.catch(() => {}); } catch (_) {}
+              }
+              add(video.currentSrc || video.src || '', true);
+              video.querySelectorAll('source[src]').forEach((source) => {
+                add(source.src, true);
+              });
             });
 
-            document.querySelectorAll('article img, main img').forEach((img) => {
+            if (!expectVideo) document.querySelectorAll('article img, main img, .EmbeddedMediaImage, .EmbeddedMedia img').forEach((img) => {
               const width = img.naturalWidth || img.width || 0;
               const height = img.naturalHeight || img.height || 0;
               if (width < 250 || height < 250) return;
               add(bestImage(img), false);
             });
 
-            if (items.size === 0) {
+            if (!expectVideo && items.size === 0) {
               const imageMeta =
                 document.querySelector('meta[property="og:image:secure_url"]')?.content ||
                 document.querySelector('meta[property="og:image"]')?.content ||
@@ -311,7 +352,7 @@ object InstagramWebMediaEngine {
               let stable = 0;
               let previous = 0;
 
-              for (let i = 0; i < 30; i++) {
+              for (let i = 0; i < 18; i++) {
                 collect();
 
                 if (items.size > previous) {
@@ -354,7 +395,7 @@ object InstagramWebMediaEngine {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.loadsImagesAutomatically = true
-            settings.mediaPlaybackRequiresUserGesture = true
+            settings.mediaPlaybackRequiresUserGesture = false
             settings.userAgentString = InstagramBrowserConfig.mobileUserAgent(context)
             isClickable = false
             isFocusable = false
