@@ -50,6 +50,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.homesweetlove.instaytgrabber.core.DiagnosticLog
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramCatalogItem
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramCatalogSection
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramDirectFileEngine
@@ -155,6 +156,7 @@ fun InstagramProfileBrowserScreen(
                     status = target.label + " " + items.size + "개 불러옴"
                 },
                 onFailure = { error ->
+                    DiagnosticLog.failure("IG-UI-SECTION", target.label + " 목록 불러오기", error)
                     status = target.label + " 불러오기 실패 · " +
                         (error.message ?: error.javaClass.simpleName)
                 }
@@ -185,6 +187,7 @@ fun InstagramProfileBrowserScreen(
                     loadSection(InstagramSection.STORY, loaded)
                 },
                 onFailure = { error ->
+                    DiagnosticLog.failure("IG-UI-PROFILE", "프로필 불러오기", error)
                     status = "프로필 불러오기 실패 · " +
                         (error.message ?: error.javaClass.simpleName)
                 }
@@ -305,6 +308,7 @@ fun InstagramProfileBrowserScreen(
                 } else {
                     failed++
                     lastError = result.exceptionOrNull()?.message.orEmpty()
+                    DiagnosticLog.failure("IG-UI-DOWNLOAD", "선택 항목 다운로드 / " + item.kind, result.exceptionOrNull())
                 }
             }
 
@@ -495,6 +499,9 @@ fun InstagramProfileBrowserScreen(
             onDismiss = { loginDialog = false },
             onUseSession = {
                 loggedIn = InstagramSession.captureFromWebView()
+                if (!loggedIn) DiagnosticLog.record(
+                    "IG-AUTH-01", "Instagram 로그인 연결", "세션 쿠키를 확인하지 못했습니다."
+                )
                 status = if (loggedIn) {
                     "Instagram 임시 로그인을 연결했어요"
                 } else {
