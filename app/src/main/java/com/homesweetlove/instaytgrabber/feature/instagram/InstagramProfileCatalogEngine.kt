@@ -2,6 +2,7 @@ package com.homesweetlove.instaytgrabber.feature.instagram
 
 import android.content.Context
 import com.chaquo.python.Python
+import com.homesweetlove.instaytgrabber.core.DiagnosticLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -39,6 +40,10 @@ enum class InstagramCatalogSection(val wireName: String) {
 }
 
 object InstagramProfileCatalogEngine {
+    private fun logFailure(code: String, stage: String, result: Result<*>) {
+        result.exceptionOrNull()?.let { DiagnosticLog.failure(code, stage, it) }
+    }
+
     suspend fun loadBase(
         context: Context,
         profileUrl: String
@@ -47,6 +52,7 @@ object InstagramProfileCatalogEngine {
             runCatching { callInstaloaderBase(profileUrl, "") }
         }
         if (instaloader.isSuccess) return instaloader
+        logFailure("IG-BASE-01", "익명 프로필 / Instaloader", instaloader)
 
         val browser = InstagramWebCatalogEngine.loadBase(
             context = context,
@@ -54,6 +60,7 @@ object InstagramProfileCatalogEngine {
             authenticated = false
         )
         if (browser.isSuccess) return browser
+        logFailure("IG-BASE-02", "익명 프로필 / WebView", browser)
 
         val gallery = withContext(Dispatchers.IO) {
             runCatching {
@@ -65,6 +72,7 @@ object InstagramProfileCatalogEngine {
             }
         }
         if (gallery.isSuccess) return gallery
+        logFailure("IG-BASE-03", "익명 프로필 / gallery-dl", gallery)
 
         val sessionCookie = InstagramSession.cookie().orEmpty()
         if (sessionCookie.isNotBlank()) {
@@ -72,6 +80,7 @@ object InstagramProfileCatalogEngine {
                 runCatching { callInstaloaderBase(profileUrl, sessionCookie) }
             }
             if (authenticatedInstaloader.isSuccess) return authenticatedInstaloader
+            logFailure("IG-BASE-04", "로그인 프로필 / Instaloader", authenticatedInstaloader)
 
             val authenticatedBrowser = InstagramWebCatalogEngine.loadBase(
                 context = context,
@@ -79,6 +88,7 @@ object InstagramProfileCatalogEngine {
                 authenticated = true
             )
             if (authenticatedBrowser.isSuccess) return authenticatedBrowser
+            logFailure("IG-BASE-05", "로그인 프로필 / WebView", authenticatedBrowser)
 
             val authenticatedGallery = withContext(Dispatchers.IO) {
                 runCatching {
@@ -90,6 +100,7 @@ object InstagramProfileCatalogEngine {
                 }
             }
             if (authenticatedGallery.isSuccess) return authenticatedGallery
+            logFailure("IG-BASE-06", "로그인 프로필 / gallery-dl", authenticatedGallery)
 
             return Result.failure(
                 IllegalStateException(
@@ -146,6 +157,7 @@ object InstagramProfileCatalogEngine {
 
             result.onFailure {
                 attempts += label + ": " + (it.message ?: it.javaClass.simpleName)
+                DiagnosticLog.failure("IG-SEC-I-" + section.wireName, label, it)
             }
 
             if (result.isSuccess) {
@@ -169,6 +181,7 @@ object InstagramProfileCatalogEngine {
 
             result.onFailure {
                 attempts += label + ": " + (it.message ?: it.javaClass.simpleName)
+                DiagnosticLog.failure("IG-SEC-G-" + section.wireName, label, it)
             }
 
             if (result.isSuccess) {
@@ -218,6 +231,7 @@ object InstagramProfileCatalogEngine {
             } else {
                 attempts += "익명 Web: " +
                     (anonymousBrowser.exceptionOrNull()?.message ?: "unknown")
+                logFailure("IG-SEC-W-" + section.wireName, "익명 WebView", anonymousBrowser)
             }
 
             if (sessionCookie.isNotBlank()) {
@@ -237,6 +251,7 @@ object InstagramProfileCatalogEngine {
                 } else {
                     attempts += "로그인 Web: " +
                         (authenticatedBrowser.exceptionOrNull()?.message ?: "unknown")
+                    logFailure("IG-SEC-WA-" + section.wireName, "로그인 WebView", authenticatedBrowser)
                 }
             }
 
