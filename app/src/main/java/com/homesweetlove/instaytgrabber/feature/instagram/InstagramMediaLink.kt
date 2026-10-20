@@ -10,6 +10,8 @@ data class InstagramMediaLink(
     val canonicalUrl: String,
     val type: InstagramMediaType
 ) {
+    val embedUrl: String get() = canonicalUrl + "embed/captioned/"
+
     companion object {
         private val shortcode = Regex("[A-Za-z0-9_-]{5,64}")
 
