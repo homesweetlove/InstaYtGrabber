@@ -7,6 +7,7 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceError
+import android.webkit.WebResourceResponse
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -86,10 +87,13 @@ object InstagramWebMediaEngine {
         pageUrl: String,
         authenticated: Boolean
     ): List<InstagramResolvedMedia> {
-        val uri = URI(pageUrl.trim())
-        val route = uri.path.orEmpty().ifBlank {
-            error("Instagram 게시물 주소가 올바르지 않습니다.")
-        }
+        val mediaLink = InstagramMediaLink.parse(pageUrl)
+            ?: error("Instagram 게시물 또는 릴스 링크를 입력해 주세요.")
+        val route = URI(mediaLink.canonicalUrl).path.trimEnd('/')
+        // Loading the Instagram home page and changing window.history does
+        // not request the media. Use a real embed URL as successful Android
+        // downloaders do, which avoids web_profile_info profile API calls.
+        val embedUrl = mediaLink.canonicalUrl + "embed/captioned/"
 
         prepareCookies(authenticated)
 
@@ -136,7 +140,7 @@ object InstagramWebMediaEngine {
                             val obj = JSONObject(payload)
                             val path = obj.optString("path")
 
-                            if (!path.startsWith(route.substringBeforeLast('/').ifBlank { route })) {
+                            if (!path.trimEnd('/').startsWith(route)) {
                                 error("Instagram 웹이 게시물 페이지를 열지 못했습니다: " + path)
                             }
 
@@ -149,7 +153,7 @@ object InstagramWebMediaEngine {
                                 for (i in 0 until array.length()) {
                                     val item = array.optJSONObject(i) ?: continue
                                     val url = item.optString("url")
-                                    if (!url.startsWith("https://")) continue
+                                    if (!InstagramMediaUrlPolicy.isAllowed(url)) continue
 
                                     add(
                                         InstagramResolvedMedia(
@@ -184,25 +188,29 @@ object InstagramWebMediaEngine {
                     if (finished || routed) return
                     routed = true
 
-                    val prefix =
-                        """
-                        (() => {
-                          try {
-                            history.pushState({}, '', '$route');
-                            window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
-                            setTimeout(() => {
-                        """.trimIndent()
+                    if (url.contains("/accounts/login")) {
+                        fail("Instagram이 이 미디어에 로그인 또는 추가 인증을 요구했습니다.")
+                        return
+                    }
+                    // Render/embed hydration takes time; execute collector on
+                    // the actual media page rather than falsifying its URL.
+                    view.postDelayed({
+                        if (!finished && view.url.orEmpty().contains(route)) {
+                            view.evaluateJavascript(collectorScript(), null)
+                        }
+                    }, 1000L)
+                }
 
-                    val suffix =
-                        """
-                            }, 3500);
-                          } catch (e) {
-                            IYGMediaBridge.onError(String(e));
-                          }
-                        })();
-                        """.trimIndent()
-
-                    view.evaluateJavascript(prefix + collectorScript() + suffix, null)
+                override fun onReceivedHttpError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    errorResponse: WebResourceResponse
+                ) {
+                    if (!request.isForMainFrame) return
+                    if (errorResponse.statusCode == 429) {
+                        InstagramRateLimit.onFailure("HTTP 429")
+                    }
+                    fail("Instagram 미디어 페이지 HTTP " + errorResponse.statusCode)
                 }
 
                 override fun onReceivedError(
@@ -220,7 +228,7 @@ object InstagramWebMediaEngine {
                 webView.post { cleanup() }
             }
 
-            webView.loadUrl("https://www.instagram.com/")
+            webView.loadUrl(embedUrl)
         }
     }
 
