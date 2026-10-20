@@ -24,31 +24,31 @@ object GrabberEngine {
         runCatching {
             val root = StoragePublisher.tempDirectory(folderName)
 
-            val mode = when (kind) {
-                GrabKind.VIDEO -> "video"
-                GrabKind.AUDIO -> "audio"
-                GrabKind.MEDIA -> "media"
-                GrabKind.THUMBNAIL -> "thumbnail"
+            try {
+                val mode = when (kind) {
+                    GrabKind.VIDEO -> "video"
+                    GrabKind.AUDIO -> "audio"
+                    GrabKind.MEDIA -> "media"
+                    GrabKind.THUMBNAIL -> "thumbnail"
+                }
+
+                val downloaded = YtDlpRuntime.download(
+                    url = url,
+                    targetDirectory = root,
+                    mode = mode,
+                    cookieHeader = cookieHeader,
+                    allowPlaylist = allowPlaylist,
+                    onProgress = onProgress
+                ).getOrThrow()
+
+                StoragePublisher.publishFiles(
+                    files = downloaded,
+                    relativeFolder = folderName
+                ).firstOrNull()
+                    ?: error("다운로드된 파일을 저장하지 못했습니다.")
+            } finally {
+                root.deleteRecursively()
             }
-
-            val downloaded = YtDlpRuntime.download(
-                url = url,
-                targetDirectory = root,
-                mode = mode,
-                cookieHeader = cookieHeader,
-                allowPlaylist = allowPlaylist,
-                onProgress = onProgress
-            ).getOrThrow()
-
-            val published = StoragePublisher.publishFiles(
-                files = downloaded,
-                relativeFolder = folderName
-            )
-
-            root.deleteRecursively()
-
-            published.firstOrNull()
-                ?: error("다운로드된 파일을 저장하지 못했습니다.")
         }
     }
 }
