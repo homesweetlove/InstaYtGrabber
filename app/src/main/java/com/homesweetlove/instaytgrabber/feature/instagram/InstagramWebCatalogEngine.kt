@@ -662,6 +662,9 @@ object InstagramWebCatalogEngine {
                     }
                   );
 
+                  if (response.status === 429) {
+                    throw new Error('HTTP 429: Instagram profile rate limited');
+                  }
                   if (!response.ok) return;
                   const payload = await response.json();
                   walk(payload);
@@ -673,7 +676,8 @@ object InstagramWebCatalogEngine {
                   let maxId = null;
                   const seenCursors = new Set();
 
-                  for (let page = 0; page < 300; page++) {
+                  // Make a bounded initial request rather than hundreds of pages.
+                  for (let page = 0; page < 8; page++) {
                     let feedUrl =
                       '/api/v1/feed/user/' +
                       encodeURIComponent(String(userId)) +
@@ -692,6 +696,9 @@ object InstagramWebCatalogEngine {
                       }
                     });
 
+                    if (feedResponse.status === 429) {
+                      throw new Error('HTTP 429: Instagram feed rate limited');
+                    }
                     if (!feedResponse.ok) break;
 
                     const feed = await feedResponse.json();
@@ -705,9 +712,11 @@ object InstagramWebCatalogEngine {
                     seenCursors.add(String(next));
                     maxId = next;
 
-                    await new Promise((resolve) => setTimeout(resolve, 650));
+                    await new Promise((resolve) => setTimeout(resolve, 1200));
                   }
-                } catch (_) {}
+                } catch (e) {
+                  if (String(e).includes('429')) throw e;
+                }
               }
 
               function collectDom() {
@@ -746,7 +755,8 @@ object InstagramWebCatalogEngine {
                     IYGBridge.onProgress(found.size);
                   }
 
-                  for (let i = 0; i < 300; i++) {
+                  // Limit automatic scrolls to protect from rate limiting.
+                  for (let i = 0; i < 30; i++) {
                     collectDom();
 
                     if (found.size !== previous) {
@@ -760,7 +770,7 @@ object InstagramWebCatalogEngine {
                     if (stable >= 16) break;
 
                     window.scrollTo(0, document.documentElement.scrollHeight);
-                    await new Promise((resolve) => setTimeout(resolve, 550));
+                    await new Promise((resolve) => setTimeout(resolve, 1100));
                   }
 
                   collectDom();
