@@ -13,8 +13,8 @@ android {
         applicationId = "com.homesweetlove.instaytgrabber"
         minSdk = 24
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.3.3"
+        versionCode = 8
+        versionName = "0.3.4"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -48,7 +48,7 @@ chaquopy {
             install("gallery-dl==1.32.14")
             install("instaloader==4.15.3")
             install("yt-dlp==2026.08.19")
-            install("yt-dlp-ejs")
+            install("yt-dlp-ejs==0.8.0")
         }
     }
 }
