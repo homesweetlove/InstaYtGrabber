@@ -727,9 +727,9 @@ private fun AccountCard(
         ) {
             IconTile(Toss.Grey) { InstagramGlyph(20.dp) }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Instagram 로그인", style = TossType.Body, color = Toss.Text1)
+                Text("앱 내 Instagram 로그인", style = TossType.Body, color = Toss.Text1)
                 Text(
-                    if (loggedIn) "스토리·하이라이트에도 로그인 세션을 사용할 수 있어요" else "스토리·하이라이트를 확인할 때 연결해 주세요",
+                    if (loggedIn) "앱 내 로그인 세션 연결됨 (Chrome 세션과 별개)" else "일부 환경에서 웹 로그인이 차단됩니다. Chrome 탐색을 이용해 주세요",
                     style = TossType.Sub,
                     color = Toss.Text3
                 )
