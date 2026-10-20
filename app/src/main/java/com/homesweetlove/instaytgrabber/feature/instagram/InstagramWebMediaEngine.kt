@@ -347,37 +347,28 @@ object InstagramWebMediaEngine {
             settings.domStorageEnabled = true
             settings.loadsImagesAutomatically = true
             settings.mediaPlaybackRequiresUserGesture = true
-            settings.userAgentString =
-                "Mozilla/5.0 (Linux; Android 16; SM-S928N) " +
-                "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                "Chrome/140.0.0.0 Mobile Safari/537.36"
+            settings.userAgentString = InstagramBrowserConfig.mobileUserAgent(context)
             isClickable = false
             isFocusable = false
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
         }
 
-    private suspend fun prepareCookies(authenticated: Boolean) {
+    private fun prepareCookies(authenticated: Boolean) {
+        // WebView's CookieManager is shared. Never wipe a valid Instagram
+        // login session while trying to download a public post.
         val manager = CookieManager.getInstance()
-
-        suspendCancellableCoroutine<Unit> { cont ->
-            manager.removeAllCookies {
-                if (authenticated) {
-                    InstagramSession.cookie()
-                        .orEmpty()
-                        .split(";")
-                        .map { it.trim() }
-                        .filter { it.contains("=") }
-                        .forEach { cookie ->
-                            manager.setCookie(
-                                "https://www.instagram.com",
-                                cookie + "; Domain=.instagram.com; Path=/; Secure"
-                            )
-                        }
-                    manager.flush()
+        manager.setAcceptCookie(true)
+        if (authenticated) {
+            InstagramSession.cookie().orEmpty().split(";")
+                .map { it.trim() }
+                .filter { it.contains("=") }
+                .forEach { cookie ->
+                    manager.setCookie(
+                        "https://www.instagram.com",
+                        cookie + "; Domain=.instagram.com; Path=/; Secure"
+                    )
                 }
-
-                if (cont.isActive) cont.resume(Unit)
-            }
+            manager.flush()
         }
     }
 }
