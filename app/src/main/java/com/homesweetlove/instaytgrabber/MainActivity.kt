@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -36,6 +37,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
+import com.homesweetlove.instaytgrabber.core.DiagnosticLog
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramEngine
 import coil.compose.AsyncImage
 import com.homesweetlove.instaytgrabber.feature.youtube.YouTubeEngine
@@ -121,8 +123,9 @@ private fun InstaYtGrabberApp(sharedUrl: String) {
         else -> PlatformTab.INSTAGRAM
     }
     var tab by remember { mutableStateOf(initialTab) }
+    var showDiagnostics by remember { mutableStateOf(false) }
     val header: @Composable () -> Unit = {
-        AppHeader(tab = tab, onTab = { tab = it })
+        AppHeader(tab = tab, onTab = { tab = it }, onLogs = { showDiagnostics = true })
     }
 
     GrabberTheme {
@@ -143,13 +146,14 @@ private fun InstaYtGrabberApp(sharedUrl: String) {
                     header = header
                 )
             }
+            if (showDiagnostics) DiagnosticScreen(onClose = { showDiagnostics = false })
         }
     }
 }
 
 /** Brand row + large title + platform segmented control. Scrolls with the page. */
 @Composable
-fun AppHeader(tab: PlatformTab, onTab: (PlatformTab) -> Unit) {
+fun AppHeader(tab: PlatformTab, onTab: (PlatformTab) -> Unit, onLogs: () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 18.dp, bottom = 20.dp),
@@ -163,6 +167,13 @@ fun AppHeader(tab: PlatformTab, onTab: (PlatformTab) -> Unit) {
                 BrandMark()
                 Text("InstaYtGrabber", style = TossType.Section.copy(letterSpacing = TossType.Sub.letterSpacing), color = Toss.Text2)
                 Spacer(Modifier.weight(1f))
+                TextButton(onClick = onLogs) {
+                    Text(
+                        "오류 기록" + if (DiagnosticLog.entries.isEmpty()) "" else " (${DiagnosticLog.entries.size})",
+                        style = TossType.Caption,
+                        color = Toss.Blue
+                    )
+                }
                 Text("v" + BuildConfig.VERSION_NAME, style = TossType.Caption, color = Toss.Text4)
             }
             Text("어떤 걸\n저장할까요?", style = TossType.Title, color = Toss.Text1)
