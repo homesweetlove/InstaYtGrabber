@@ -13,7 +13,7 @@ object InstagramRateLimit {
     @Synchronized
     fun onFailure(message: String?, now: Long = System.currentTimeMillis()): Boolean {
         val text = message.orEmpty()
-        val rateLimited = Regex("""(?i)(?:\\b429\\b|too many requests|rate limit(?:ed)?)""")
+        val rateLimited = Regex("""(?i)(?:\b429\b|too many requests|rate limit(?:ed)?)""")
             .containsMatchIn(text)
         if (rateLimited) {
             instaloaderBlockedUntil = maxOf(instaloaderBlockedUntil, now + COOLDOWN_MS)
