@@ -85,7 +85,7 @@ QuickJS가 없거나 Android에서 실행할 수 없으면 YouTube 영상·음�
 빌드 성공만으로 YouTube 다운로드 성공이 보장되는 것은 아니며 실기기 테스트가 필요합니다.
 Instagram 사진·영상 저장은 QuickJS와 별도인 gallery-dl 경로를 사용합니다.
 
-GitHub Actions도 `main` push 시 자동으로 debug APK를 빌드하며, 성공한 run의 **Artifacts → InstaYtGrabber-debug**에서 APK를 받을 수 있습니다.
+GitHub Actions는 `main` push 시 debug APK를 빌드하고, 성공하면 [GitHub Releases → debug-latest](https://github.com/homesweetlove/InstaYtGrabber/releases/tag/debug-latest)에 업로드합니다. PR에서는 빌드만 확인하며 APK 릴리스를 만들지 않습니다.
 
 ## 개인정보 처리 방향
 - 별도 백엔드 없음
