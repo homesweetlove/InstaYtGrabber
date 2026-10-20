@@ -508,6 +508,51 @@ fun InstagramProfileBrowserScreen(
                         }
                     }
 
+                    TossCard {
+                        SectionTitle("Chrome에서 프로필 열기")
+                        Text(
+                            "Chrome에서 Instagram에 로그인한 상태로 게시글·릴스를 찾아볼 수 있어요. " +
+                                "Chrome 공유 메뉴에서 InstaYtGrabber를 선택하거나 링크를 복사해 아래에 붙여넣으세요.",
+                            style = TossType.Caption,
+                            color = Toss.Text3
+                        )
+                        TossButton(
+                            text = "Chrome에서 Instagram 열기",
+                            onClick = { openProfileInChrome() },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !downloading,
+                            style = TossButtonStyle.Secondary
+                        )
+                        SectionTitle("게시글·릴스 링크 저장")
+                        TossTextField(
+                            value = directLink,
+                            onValueChange = { directLink = it },
+                            placeholder = "https://www.instagram.com/reel/...",
+                            enabled = !downloading
+                        )
+                        TossButton(
+                            text = "이 링크 저장하기",
+                            onClick = { downloadDirectLink() },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = directLink.isNotBlank() && !downloading
+                        )
+                        Text(
+                            "Chrome 로그인은 이 앱과 자동 연동되지 않습니다. " +
+                                "저장 기능도 Instagram의 요청 제한(429)에 영향을 받을 수 있습니다.",
+                            style = TossType.Caption,
+                            color = Toss.Text3
+                        )
+                        if (directLinkStatus.isNotBlank()) {
+                            Text(
+                                directLinkStatus,
+                                style = TossType.Caption,
+                                color = if (directLinkStatus.contains("실패") ||
+                                    directLinkStatus.contains("제한")
+                                ) Toss.Red else Toss.Text2
+                            )
+                        }
+                    }
+
                     AccountCard(
                         loggedIn = loggedIn,
                         enabled = !baseLoading && !downloading,
