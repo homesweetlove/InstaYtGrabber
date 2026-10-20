@@ -226,7 +226,10 @@ object InstagramWebMediaEngine {
                     view.postDelayed({
                         if (!finished && view.url.orEmpty().contains(route)) {
                             view.evaluateJavascript(
-                                collectorScript(expectVideo = mediaLink.type == InstagramMediaType.REEL),
+                                collectorScript(
+                                    expectVideo = mediaLink.type == InstagramMediaType.REEL,
+                                    shortcode = mediaLink.canonicalUrl.trimEnd('/').substringAfterLast('/')
+                                ),
                                 null
                             )
                         }
@@ -264,11 +267,12 @@ object InstagramWebMediaEngine {
         }
     }
 
-    private fun collectorScript(expectVideo: Boolean): String =
+    private fun collectorScript(expectVideo: Boolean, shortcode: String): String =
         """
         (() => {
           const items = new Map();
           const expectVideo = $expectVideo;
+          const targetCode = "$shortcode";
 
           function add(url, video) {
             if (!url || typeof url !== 'string') return;
@@ -291,7 +295,65 @@ object InstagramWebMediaEngine {
             return img.currentSrc || img.src || '';
           }
 
+          // Instagram sometimes embeds the post payload in JSON script nodes.
+          // Look for this one shortcode only; do not request profile APIs.
+          function collectEmbeddedJson() {
+            let walked = 0;
+            const limit = 12000;
+
+            function readMedia(node) {
+              if (!node || typeof node !== 'object') return;
+              const versions = node.video_versions;
+              const bestVideo = Array.isArray(versions)
+                ? versions.slice().sort((a,b) =>
+                    (b.width || 0) * (b.height || 0) -
+                    (a.width || 0) * (a.height || 0))[0]?.url
+                : node.video_url;
+              if (bestVideo) add(bestVideo, true);
+
+              if (!bestVideo && !expectVideo) {
+                const images = node.image_versions2?.candidates;
+                const best = Array.isArray(images)
+                  ? images.slice().sort((a,b) =>
+                      (b.width || 0) * (b.height || 0) -
+                      (a.width || 0) * (a.height || 0))[0]?.url
+                  : (node.display_url || node.thumbnail_src);
+                if (best) add(best, false);
+              }
+
+              const carousel = node.carousel_media ||
+                node.edge_sidecar_to_children?.edges?.map((edge) => edge.node);
+              if (Array.isArray(carousel)) carousel.forEach(readMedia);
+            }
+
+            function walk(node, depth) {
+              if (!node || typeof node !== 'object' || depth > 13 || walked++ > limit) return;
+              if (Array.isArray(node)) {
+                for (const child of node) walk(child, depth + 1);
+                return;
+              }
+              if ((node.code || node.shortcode) === targetCode) {
+                readMedia(node);
+              }
+              for (const key in node) {
+                if (Object.prototype.hasOwnProperty.call(node, key)) {
+                  const child = node[key];
+                  if (child && typeof child === 'object') walk(child, depth + 1);
+                }
+              }
+            }
+
+            document.querySelectorAll('script[type="application/json"], script[data-sjs], script[type="application/ld+json"]')
+              .forEach((script) => {
+                const raw = (script.textContent || '').trim();
+                if (!raw || raw.length > 4000000 ||
+                    (raw[0] !== '{' && raw[0] !== '[')) return;
+                try { walk(JSON.parse(raw), 0); } catch (_) {}
+              });
+          }
+
           function collect() {
+            if (items.size === 0) collectEmbeddedJson();
             const videoMeta =
               document.querySelector('meta[property="og:video:secure_url"]')?.content ||
               document.querySelector('meta[property="og:video"]')?.content ||
