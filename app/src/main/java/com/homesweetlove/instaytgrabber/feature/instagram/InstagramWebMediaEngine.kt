@@ -93,7 +93,7 @@ object InstagramWebMediaEngine {
         // Loading the Instagram home page and changing window.history does
         // not request the media. Use a real embed URL as successful Android
         // downloaders do, which avoids web_profile_info profile API calls.
-        val embedUrl = mediaLink.canonicalUrl + "embed/captioned/"
+        val embedUrl = mediaLink.embedUrl
 
         prepareCookies(authenticated)
 
