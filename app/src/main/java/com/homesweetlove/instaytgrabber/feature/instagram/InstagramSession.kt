@@ -20,9 +20,16 @@ object InstagramSession {
         return hasSession
     }
 
-    fun cookie(): String? = cookieHeader
+    // Android WebView persists cookies between app launches, unlike this
+    // process-local field. Recover the session without storing credentials.
+    fun cookie(): String? {
+        if (cookieHeader.isNullOrBlank()) {
+            captureFromWebView()
+        }
+        return cookieHeader
+    }
 
-    fun isLoggedIn(): Boolean = !cookieHeader.isNullOrBlank()
+    fun isLoggedIn(): Boolean = !cookie().isNullOrBlank()
 
     fun clear() {
         cookieHeader = null
