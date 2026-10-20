@@ -11,8 +11,13 @@ object InstagramSession {
             .getCookie("https://www.instagram.com")
             ?.trim()
             .orEmpty()
-        cookieHeader = cookies.ifBlank { null }
-        return cookieHeader != null
+        // Guest cookies do not mean the user successfully logged in.
+        val hasSession = cookies.split(";").any { part ->
+            part.trim().startsWith("sessionid=") &&
+                part.substringAfter("=", "").isNotBlank()
+        }
+        cookieHeader = cookies.takeIf { hasSession }
+        return hasSession
     }
 
     fun cookie(): String? = cookieHeader
