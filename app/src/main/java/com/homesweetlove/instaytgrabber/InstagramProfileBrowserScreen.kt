@@ -499,46 +499,18 @@ fun InstagramProfileBrowserScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     TossCard {
-                        SectionTitle("프로필 아이디 또는 링크")
-                        TossTextField(
-                            value = url,
-                            onValueChange = { url = it },
-                            placeholder = "아이디 · @아이디 · instagram.com/아이디",
-                            enabled = !baseLoading && !downloading
-                        )
-                        TossButton(
-                            text = when {
-                                baseLoading -> "불러오는 중…"
-                                profile != null -> "다시 불러오기"
-                                else -> "프로필 불러오기"
-                            },
-                            onClick = { loadProfile() },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = url.isNotBlank() && !baseLoading && !downloading,
-                            style = if (profile != null) TossButtonStyle.Secondary else TossButtonStyle.Primary
-                        )
-                        if (profile == null) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                if (baseLoading) SmallSpinner()
-                                Text(
-                                    status,
-                                    style = TossType.Caption,
-                                    color = if (status.contains("실패")) Toss.Red else Toss.Text3
-                                )
-                            }
-                        }
-                    }
-
-                    TossCard {
-                        SectionTitle("Chrome에서 프로필 열기")
+                        SectionTitle("1. Chrome에서 확인 · 링크로 저장")
                         Text(
                             "Chrome에서 Instagram에 로그인한 상태로 게시글·릴스를 찾아볼 수 있어요. " +
                                 "Chrome 공유 메뉴에서 InstaYtGrabber를 선택하거나 링크를 복사해 아래에 붙여넣으세요.",
                             style = TossType.Caption,
                             color = Toss.Text3
+                        )
+                        TossTextField(
+                            value = url,
+                            onValueChange = { url = it },
+                            placeholder = "아이디 · @아이디 · instagram.com/아이디",
+                            enabled = !baseLoading && !downloading
                         )
                         TossButton(
                             text = "Chrome에서 Instagram 열기",
@@ -576,6 +548,41 @@ fun InstagramProfileBrowserScreen(
                             )
                         }
                     }
+
+                    TossCard {
+                        SectionTitle("2. 프로필 전체 목록 불러오기 (실험적)")
+                        Text(
+                            "Instagram 프로필 API는 로그인하지 않은 앱에서 429를 반환할 수 있어요. " +
+                                "위의 Chrome 공유 링크 저장을 먼저 권장합니다.",
+                            style = TossType.Caption,
+                            color = Toss.Text3
+                        )
+                        TossButton(
+                            text = when {
+                                baseLoading -> "불러오는 중…"
+                                profile != null -> "다시 불러오기"
+                                else -> "프로필 불러오기"
+                            },
+                            onClick = { loadProfile() },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = url.isNotBlank() && !baseLoading && !downloading,
+                            style = if (profile != null) TossButtonStyle.Secondary else TossButtonStyle.Primary
+                        )
+                        if (profile == null) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (baseLoading) SmallSpinner()
+                                Text(
+                                    status,
+                                    style = TossType.Caption,
+                                    color = if (status.contains("실패")) Toss.Red else Toss.Text3
+                                )
+                            }
+                        }
+                    }
+
 
                     AccountCard(
                         loggedIn = loggedIn,
