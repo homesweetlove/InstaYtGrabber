@@ -51,6 +51,10 @@ jobs:
           gradle-version: '8.9'
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses >/dev/null || true
+      - name: Validate Python and QuickJS build script syntax
+        run: |
+          python -m compileall -q app/src/main/python
+          bash -n .github/scripts/build-quickjs-android.sh
       - name: Install Android NDK and native build tools
         run: |
           sdkmanager "ndk;27.2.12479018" "cmake;3.22.1" >/dev/null
