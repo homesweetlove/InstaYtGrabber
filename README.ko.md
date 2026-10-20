@@ -62,9 +62,28 @@ Android Studio에서 프로젝트를 열고 Gradle Sync 후 실행합니다.
 
 로컬 CLI 빌드에는 JDK 17과 Python 3.11이 필요합니다.
 
+### YouTube JavaScript 실행 환경
+
+YouTube는 최신 yt-dlp에서 JavaScript 챌린지 해결용 외부 실행 환경이 필요합니다.
+이 프로젝트는 [QuickJS-NG v0.17.0](https://github.com/quickjs-ng/quickjs/releases/tag/v0.17.0)의 공식 소스를 Android NDK로 직접 크로스 컴파일합니다.
+다른 Android 다운로더의 GPL 코드를 프로젝트에 복사하지 않았습니다.
+
+- 원본: `quickjs-ng/quickjs` (MIT 라이선스)
+- 고정 소스 커밋: `6d46d07d04041b40f4f49eaa7fdebe44c314c699`
+- 지원 ABI: `arm64-v8a`, `armeabi-v7a`, `x86_64`
+- 출력 위치: `app/src/main/jniLibs/<ABI>/libqjs.so`
+- yt-dlp: `2026.08.19`, yt-dlp-ejs: `0.8.0` (버전 일치 필요)
+
+GitHub Actions는 APK 빌드 전에 자동으로 QuickJS를 컴파일합니다. 로컬 개발에서는 **Android NDK 27.2.12479018**, `cmake`, `ninja`, `git`, Bash를 준비하고 아래 순서대로 실행하세요.
+
 ```bash
+bash .github/scripts/build-quickjs-android.sh
 gradle :app:assembleDebug
 ```
+
+QuickJS가 없거나 Android에서 실행할 수 없으면 YouTube 영상·음원 저장 전에 오류 메시지를 표시합니다.
+빌드 성공만으로 YouTube 다운로드 성공이 보장되는 것은 아니며 실기기 테스트가 필요합니다.
+Instagram 사진·영상 저장은 QuickJS와 별도인 gallery-dl 경로를 사용합니다.
 
 GitHub Actions도 `main` push 시 자동으로 debug APK를 빌드하며, 성공한 run의 **Artifacts → InstaYtGrabber-debug**에서 APK를 받을 수 있습니다.
 
