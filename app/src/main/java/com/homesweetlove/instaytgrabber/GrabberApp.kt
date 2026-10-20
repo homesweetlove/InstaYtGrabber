@@ -7,6 +7,7 @@ import com.chaquo.python.android.AndroidPlatform
 import com.homesweetlove.instaytgrabber.core.DiagnosticLog
 import com.homesweetlove.instaytgrabber.core.StoragePublisher
 import com.homesweetlove.instaytgrabber.core.YtDlpRuntime
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramRateLimit
 
 class GrabberApp : Application() {
     override fun onCreate() {
@@ -21,6 +22,7 @@ class GrabberApp : Application() {
         }
 
         DiagnosticLog.attach(this)
+        InstagramRateLimit.attach(this)
         StoragePublisher.attach(this)
         YtDlpRuntime.attach(this)
     }
