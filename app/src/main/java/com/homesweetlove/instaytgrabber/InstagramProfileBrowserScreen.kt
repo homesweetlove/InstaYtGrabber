@@ -100,7 +100,7 @@ fun InstagramProfileBrowserScreen(
 ) {
     var url by remember { mutableStateOf(initialUrl) }
     var resolvedProfileUrl by remember { mutableStateOf("") }
-    var section by remember { mutableStateOf(InstagramSection.STORY) }
+    var section by remember { mutableStateOf(InstagramSection.POST) }
     var profile by remember { mutableStateOf<InstagramProfileCatalog?>(null) }
     var stories by remember { mutableStateOf<List<InstagramCatalogItem>>(emptyList()) }
     var highlights by remember { mutableStateOf<List<InstagramCatalogItem>>(emptyList()) }
@@ -133,6 +133,17 @@ fun InstagramProfileBrowserScreen(
     ) {
         val current = base ?: return
         if (!force && (target in loadedSections || target in loadingSections)) return
+
+        // Public Instagram stories and highlights are often protected by a
+        // logged-in session. This is not evidence that the profile is private.
+        // Do not issue anonymous API calls or write a misleading failure log.
+        if ((target == InstagramSection.STORY || target == InstagramSection.HIGHLIGHT) &&
+            !InstagramSession.isLoggedIn()
+        ) {
+            status = target.label + "는 Instagram 로그인 연결 후 조회할 수 있어요. " +
+                "게시글·릴스는 로그인 없이도 시도할 수 있어요."
+            return
+        }
 
         scope.launch {
             loadingSections = loadingSections + target
@@ -186,14 +197,14 @@ fun InstagramProfileBrowserScreen(
             loadedSections = emptySet()
             loadingSections = emptySet()
             selected = emptySet()
-            section = InstagramSection.STORY
+            section = InstagramSection.POST
             status = "프로필 정보 불러오는 중…"
 
             InstagramProfileCatalogEngine.loadBase(context, canonicalUrl).fold(
                 onSuccess = { loaded ->
                     profile = loaded
                     status = "@" + loaded.username + " 프로필 불러옴"
-                    loadSection(InstagramSection.STORY, loaded)
+                    loadSection(InstagramSection.POST, loaded)
                 },
                 onFailure = { error ->
                     DiagnosticLog.failure("IG-UI-PROFILE", "프로필 불러오기", error)
@@ -451,8 +462,16 @@ fun InstagramProfileBrowserScreen(
                 if (visibleItems.isEmpty() && !currentSectionLoading) {
                     fullWidth {
                         Text(
-                            if (section in loadedSections) "표시할 " + section.label + " 항목이 없어요"
-                            else "목록을 불러오지 못했어요. 새로고침을 눌러 주세요",
+                            if ((section == InstagramSection.STORY || section == InstagramSection.HIGHLIGHT) &&
+                                !loggedIn
+                            ) {
+                                "공개 계정이어도 " + section.label +
+                                    "는 Instagram 로그인이 필요할 수 있어요. 위의 계정 연결에서 로그인해 주세요."
+                            } else if (section in loadedSections) {
+                                "표시할 " + section.label + " 항목이 없어요"
+                            } else {
+                                "목록을 불러오지 못했어요. 새로고침을 눌러 주세요"
+                            },
                             style = TossType.BodyRegular,
                             color = Toss.Text3,
                             textAlign = TextAlign.Center,
