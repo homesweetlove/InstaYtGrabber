@@ -499,10 +499,10 @@ fun InstagramProfileBrowserScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     TossCard {
-                        SectionTitle("1. Chrome에서 확인 · 링크로 저장")
+                        SectionTitle("1. 앱 안에서 로그인 · 탐색 · 저장")
                         Text(
-                            "Chrome에서 Instagram에 로그인한 상태로 게시글·릴스를 찾아볼 수 있어요. " +
-                                "Chrome 공유 메뉴에서 InstaYtGrabber를 선택하거나 링크를 복사해 아래에 붙여넣으세요.",
+                            "앱 안에 Firefox 엔진을 내장했습니다. 같은 화면에서 로그인하고 프로필, 게시글, " +
+                                "릴스를 탐색한 뒤 현재 미디어를 저장할 수 있어요. 외부 브라우저는 필요하지 않습니다.",
                             style = TossType.Caption,
                             color = Toss.Text3
                         )
@@ -513,8 +513,8 @@ fun InstagramProfileBrowserScreen(
                             enabled = !baseLoading && !downloading
                         )
                         TossButton(
-                            text = "Chrome에서 Instagram 열기",
-                            onClick = { openProfileInChrome() },
+                            text = "Instagram 내부 브라우저 열기",
+                            onClick = { loginDialog = true },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !downloading,
                             style = TossButtonStyle.Secondary
@@ -533,8 +533,8 @@ fun InstagramProfileBrowserScreen(
                             enabled = directLink.isNotBlank() && !downloading
                         )
                         Text(
-                            "Chrome 로그인은 이 앱과 자동 연동되지 않습니다. " +
-                                "저장 기능도 Instagram의 요청 제한(429)에 영향을 받을 수 있습니다.",
+                            "아래 단일 링크 저장은 별도 엔진을 사용합니다. " +
+                                "기존 WebView·Python 조회가 제한될 경우 위의 내장 브라우저를 이용하세요.",
                             style = TossType.Caption,
                             color = Toss.Text3
                         )
@@ -584,16 +584,6 @@ fun InstagramProfileBrowserScreen(
                     }
 
 
-                    AccountCard(
-                        loggedIn = loggedIn,
-                        enabled = !baseLoading && !downloading,
-                        onLogin = { loginDialog = true },
-                        onLogout = {
-                            InstagramSession.clear()
-                            loggedIn = false
-                            status = "로그인 세션을 삭제했어요"
-                        }
-                    )
 
                     profile?.let { current ->
                         ProfileCard(current)
@@ -707,21 +697,9 @@ fun InstagramProfileBrowserScreen(
     }
 
     if (loginDialog) {
-        ProfileInstagramLoginDialog(
-            onDismiss = { loginDialog = false },
-            onUseSession = {
-                loggedIn = InstagramSession.captureFromWebView()
-                if (!loggedIn) DiagnosticLog.record(
-                    "IG-AUTH-01", "Instagram 로그인 연결", "세션 쿠키를 확인하지 못했습니다."
-                )
-                status = if (loggedIn) {
-                    "Instagram 로그인을 연결했어요"
-                } else {
-                    "로그인 세션을 찾지 못했어요"
-                }
-                loginDialog = false
-                if (loggedIn && url.isNotBlank()) loadProfile()
-            }
+        InstagramGeckoBrowser(
+            initialProfile = directLink.takeIf { it.isNotBlank() } ?: url,
+            onDismiss = { loginDialog = false }
         )
     }
 }
