@@ -1,6 +1,9 @@
 package com.homesweetlove.instaytgrabber
 
 import android.content.Context
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -257,6 +260,14 @@ fun InstagramGeckoBrowser(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("Instagram · 앱 내부 브라우저", style = TossType.Section, color = Toss.Text1)
+                    TextButton(onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                            as ClipboardManager
+                        clipboard.setPrimaryClip(
+                            ClipData.newPlainText("InstaYtGrabber 오류 기록", DiagnosticLog.report())
+                        )
+                        Toast.makeText(context, "오류 기록을 복사했어요", Toast.LENGTH_SHORT).show()
+                    }) { Text("오류 복사") }
                     TextButton(onClick = onDismiss) { Text("닫기") }
                 }
                 Text(
