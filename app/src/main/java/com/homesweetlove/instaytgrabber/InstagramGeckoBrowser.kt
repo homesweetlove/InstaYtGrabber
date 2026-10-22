@@ -29,6 +29,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.homesweetlove.instaytgrabber.core.DiagnosticLog
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramDirectFileEngine
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramMediaLink
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramMediaUrlPolicy
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileInput
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramRateLimit
@@ -139,9 +140,9 @@ fun InstagramGeckoBrowser(
                 }
             )
 
-            val initial = runCatching {
-                InstagramProfileInput.normalize(initialProfile)
-            }.getOrDefault("https://www.instagram.com/accounts/login/")
+            val initial = InstagramMediaLink.parse(initialProfile)?.canonicalUrl
+                ?: runCatching { InstagramProfileInput.normalize(initialProfile) }
+                    .getOrDefault("https://www.instagram.com/accounts/login/")
             session.loadUri(initial)
         } catch (error: Exception) {
             DiagnosticLog.failure("IG-GECKO-INIT", "Firefox 내장 브라우저", error)
