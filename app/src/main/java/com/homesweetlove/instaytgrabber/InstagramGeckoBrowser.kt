@@ -37,6 +37,7 @@ import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebExtension
+import org.mozilla.geckoview.WebRequestError
 
 private object BrowserRuntime {
     // A GeckoRuntime may only be created once per app process. Gecko cookies
@@ -74,6 +75,22 @@ fun InstagramGeckoBrowser(
         try {
             val runtime = BrowserRuntime.get(context)
             session.contentDelegate = object : GeckoSession.ContentDelegate {}
+            session.navigationDelegate = object : GeckoSession.NavigationDelegate {
+                override fun onLoadError(
+                    session: GeckoSession,
+                    uri: String?,
+                    error: WebRequestError
+                ): GeckoResult<String>? {
+                    val details = "Gecko network category=" + error.category +
+                        ", code=" + error.code
+                    DiagnosticLog.record(
+                        "IG-GECKO-NET", "내장 브라우저 네트워크", details
+                    )
+                    state = "Instagram 연결 실패 (" + error.category + "/" +
+                        error.code + ") · 오류 기록 확인"
+                    return null
+                }
+            }
             session.progressDelegate = object : GeckoSession.ProgressDelegate {
                 override fun onPageStart(session: GeckoSession, url: String) {
                     state = "페이지 불러오는 중…"
@@ -114,7 +131,32 @@ fun InstagramGeckoBrowser(
                                 sender: WebExtension.MessageSender
                             ): GeckoResult<Any>? {
                                 if (sender.session != session || message !is JSONObject) return null
-                                if (message.optString("type") != "media") return null
+                                val messageType = message.optString("type")
+                                if (messageType == "status") {
+                                    val category = message.optString("category")
+                                    val allowed = setOf(
+                                        "login_form", "login_error", "rate_limited",
+                                        "challenge", "signed_in", "unsupported_browser"
+                                    )
+                                    if (category in allowed) {
+                                        state = when (category) {
+                                            "login_error" -> "Instagram이 로그인을 거절했습니다 · 계정 인증을 확인해 주세요"
+                                            "rate_limited" -> "Instagram 요청 제한 감지 · 반복 로그인을 중단해 주세요"
+                                            "challenge" -> "Instagram 추가 보안 확인이 필요합니다"
+                                            "signed_in" -> "Instagram 로그인 화면을 통과했어요"
+                                            "unsupported_browser" -> "Instagram이 내장 브라우저 로그인을 지원하지 않는다고 응답했습니다"
+                                            else -> "Instagram 로그인 화면이 열렸습니다"
+                                        }
+                                        if (category != "login_form" && category != "signed_in") {
+                                            DiagnosticLog.record(
+                                                "IG-GECKO-AUTH", "Instagram 화면 상태",
+                                                "인증 단계: " + category
+                                            )
+                                        }
+                                    }
+                                    return null
+                                }
+                                if (messageType != "media") return null
                                 val page = message.optString("page")
                                 val host = runCatching {
                                     java.net.URI(page).host.orEmpty().lowercase()
