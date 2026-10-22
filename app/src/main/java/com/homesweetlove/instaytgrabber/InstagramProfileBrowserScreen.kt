@@ -135,36 +135,11 @@ fun InstagramProfileBrowserScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    fun openProfileInChrome() {
-        val target = runCatching {
-            if (url.isNotBlank()) InstagramProfileInput.normalize(url)
-            else "https://www.instagram.com/"
-        }.getOrElse { error ->
-            DiagnosticLog.failure("IG-CHROME-INPUT", "Chrome 프로필 주소", error)
-            status = "프로필 아이디가 올바르지 않습니다."
-            return
-        }
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(target))
-            .addCategory(Intent.CATEGORY_BROWSABLE)
-            .setPackage("com.android.chrome")
-        runCatching {
-            try {
-                context.startActivity(intent)
-            } catch (_: android.content.ActivityNotFoundException) {
-                intent.setPackage(null)
-                context.startActivity(intent)
-            }
-        }.onFailure {
-            DiagnosticLog.failure("IG-CHROME-OPEN", "Chrome에서 열기", it)
-            directLinkStatus = "Chrome을 열지 못했어요."
-        }
-    }
-
     fun downloadDirectLink() {
         val media = InstagramMediaLink.parse(directLink)
         if (media == null) {
             directLinkStatus = "Instagram 게시글 또는 릴스 링크를 입력해 주세요."
-            DiagnosticLog.record("IG-LINK-INPUT", "Chrome 공유 링크", "올바르지 않은 게시글 또는 릴스 주소")
+            DiagnosticLog.record("IG-LINK-INPUT", "게시물·릴스 링크", "올바르지 않은 게시글 또는 릴스 주소")
             return
         }
         if (InstagramRateLimit.shouldSkipMedia()) {
@@ -230,12 +205,12 @@ fun InstagramProfileBrowserScreen(
                         InstagramRateLimit.onMedia429()
                         DiagnosticLog.record(
                             "IG-LINK-429",
-                            "Chrome에서 공유한 링크",
+                            "Instagram 단일 미디어 링크",
                             "Instagram 서버에서 HTTP 429 제한이 발생해 요청을 중단했습니다."
                         )
                     }
                     DiagnosticLog.failure(
-                        "IG-LINK-DOWNLOAD", "Chrome에서 공유한 " + media.type.label, error
+                        "IG-LINK-DOWNLOAD", "Instagram 단일 미디어 " + media.type.label, error
                     )
                     task = TaskState.Failed(
                         title = "링크 저장에 실패했어요",
@@ -553,7 +528,7 @@ fun InstagramProfileBrowserScreen(
                         SectionTitle("2. 프로필 전체 목록 불러오기 (실험적)")
                         Text(
                             "Instagram 프로필 API는 로그인하지 않은 앱에서 429를 반환할 수 있어요. " +
-                                "위의 Chrome 공유 링크 저장을 먼저 권장합니다.",
+                                "위의 앱 내부 브라우저에서 로그인·탐색·저장을 먼저 시도해 주세요.",
                             style = TossType.Caption,
                             color = Toss.Text3
                         )
@@ -1057,293 +1032,3 @@ private fun MediaBadge(text: String, video: Boolean = false) {
 
 private fun InstagramCatalogItem.selectionKey(): String =
     kind + "|" + id + "|" + targetUrl
-
-@Composable
-private fun ProfileInstagramLoginDialog(
-    onDismiss: () -> Unit,
-    onUseSession: () -> Unit
-) {
-    var loading by remember { mutableStateOf(true) }
-    var progress by remember { mutableIntStateOf(0) }
-    var pageStatus by remember { mutableStateOf("Instagram 로그인 페이지 연결 중…") }
-    var errorStatus by remember { mutableStateOf("") }
-    var retryKey by remember { mutableIntStateOf(0) }
-    var signedIn by remember { mutableStateOf(false) }
-    var loginBlocked by remember { mutableStateOf(InstagramRateLimit.shouldSkipLogin()) }
-    val context = LocalContext.current
-    val loginUrl = "https://www.instagram.com/accounts/login/"
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.94f)
-                .padding(horizontal = 8.dp),
-            shape = RoundedCornerShape(22.dp),
-            color = Color.White
-        ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Instagram 로그인", style = TossType.Section, color = Toss.Text1)
-                        Text(
-                            "Instagram 공식 페이지에서 로그인하세요",
-                            style = TossType.Caption,
-                            color = Toss.Text3
-                        )
-                    }
-                    ToolbarAction("닫기", true, onDismiss)
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (loading) SmallSpinner()
-                    Text(
-                        if (loading) pageStatus + " " + progress + "%"
-                        else if (errorStatus.isNotBlank()) errorStatus
-                        else "로그인 화면에서 인증을 완료해 주세요",
-                        style = TossType.Caption,
-                        color = if (errorStatus.isBlank()) Toss.Text3 else Toss.Red,
-                        modifier = Modifier.weight(1f)
-                    )
-                    ToolbarAction("새로고침", !loginBlocked) {
-                        if (!InstagramRateLimit.shouldSkipLogin()) {
-                            errorStatus = ""
-                            loading = true
-                            progress = 0
-                            retryKey++
-                        } else {
-                            loginBlocked = true
-                        }
-                    }
-                    ToolbarAction("상태 확인", true) {
-                        loginBlocked = InstagramRateLimit.shouldSkipLogin()
-                        if (!loginBlocked && errorStatus.contains("429")) {
-                            errorStatus = "대기 시간이 끝났습니다. 새로고침은 한 번만 시도해 주세요."
-                        }
-                    }
-                    ToolbarAction("세션 확인", true) {
-                        if (InstagramSession.captureFromWebView()) {
-                            if (!signedIn) {
-                                signedIn = true
-                                onUseSession()
-                            }
-                        } else {
-                            pageStatus = "로그인 후 세션을 확인해 주세요"
-                            errorStatus = "아직 Instagram 로그인 세션이 없습니다."
-                        }
-                    }
-                }
-                // The WebView has to be a real, visible browser, not the hidden
-                // Instagram media-extraction WebView. The system WebView UA has
-                // a "; wv" marker which Instagram may respond to with a blank page.
-                if (loginBlocked) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().weight(1f).padding(24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            "Instagram 서버가 로그인 화면 요청을 제한했습니다 (HTTP 429). " +
-                                "앱은 추가 로그인 요청을 중단했습니다. " +
-                                "최소 " + InstagramRateLimit.loginRemainingMinutes() +
-                                "분간 기다린 뒤 상태 확인을 눌러 주세요. " +
-                                "실제 제한 해제 시각은 Instagram에서 결정합니다.",
-                            style = TossType.BodyRegular,
-                            color = Toss.Text2
-                        )
-                    }
-                } else key(retryKey) {
-                    AndroidView(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        factory = { context ->
-                            val cookieManager = CookieManager.getInstance()
-                            cookieManager.setAcceptCookie(true)
-                            WebView(context).apply {
-                                setBackgroundColor(android.graphics.Color.WHITE)
-                                settings.javaScriptEnabled = true
-                                settings.domStorageEnabled = true
-                                settings.loadsImagesAutomatically = true
-                                settings.javaScriptCanOpenWindowsAutomatically = false
-                                settings.useWideViewPort = true
-                                // Use the installed Chromium version, omitting
-                                // the embedded WebView token, rather than a stale
-                                // hard-coded Chrome version.
-                                settings.userAgentString =
-                                    InstagramBrowserConfig.mobileUserAgent(context)
-                                cookieManager.setAcceptThirdPartyCookies(this, true)
-
-                                webChromeClient = object : WebChromeClient() {
-                                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                        progress = newProgress
-                                    }
-                                }
-                                webViewClient = object : WebViewClient() {
-                                    override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
-                                        loading = true
-                                        errorStatus = ""
-                                        pageStatus = "Instagram 페이지 여는 중…"
-                                    }
-
-                                    override fun onPageFinished(view: WebView, url: String?) {
-                                        if (loginBlocked) return
-                                        cookieManager.flush()
-                                        loading = false
-                                        progress = 100
-                                        pageStatus = "Instagram 페이지를 열었어요"
-                                        if (InstagramSession.captureFromWebView() && !signedIn) {
-                                            signedIn = true
-                                            onUseSession()
-                                            return
-                                        }
-                                        // Instagram's JS may render after onPageFinished.
-                                        // Only diagnose a persistently blank body.
-                                        view.postDelayed({
-                                            if (view.isAttachedToWindow && !signedIn &&
-                                                errorStatus.isBlank()
-                                            ) {
-                                                view.evaluateJavascript(
-                                                    "(document.body && document.body.innerText ? document.body.innerText.trim().length : 0)"
-                                                ) { result ->
-                                                    if (result.trim('"').toIntOrNull() == 0 &&
-                                                        errorStatus.isBlank() && !signedIn
-                                                    ) {
-                                                        errorStatus = "로그인 페이지가 비어 있습니다. 새로고침하거나 Android System WebView를 업데이트해 주세요."
-                                                        DiagnosticLog.record(
-                                                            "IG-LOGIN-BLANK",
-                                                            "Instagram 로그인 화면",
-                                                            "로그인 페이지가 표시됐지만 본문이 비어 있습니다."
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }, 4500L)
-                                    }
-
-                                    override fun onReceivedHttpError(
-                                        view: WebView,
-                                        request: WebResourceRequest,
-                                        response: WebResourceResponse
-                                    ) {
-                                        if (!request.isForMainFrame) return
-                                        val code = response.statusCode
-                                        if (code == 429) {
-                                            val retryAfter = response.responseHeaders?.entries
-                                                ?.firstOrNull { it.key.equals("Retry-After", true) }
-                                                ?.value?.trim()?.toLongOrNull()
-                                            InstagramRateLimit.onLoginHttp429(retryAfter)
-                                            loginBlocked = true
-                                            loading = false
-                                        }
-                                        errorStatus = if (code == 429) {
-                                            "Instagram에서 로그인 요청을 제한했습니다 (HTTP 429). " +
-                                                "반복 접속을 중단하고 나중에 다시 시도해 주세요."
-                                        } else {
-                                            "Instagram 서버 응답 오류: HTTP " + code
-                                        }
-                                        DiagnosticLog.record(
-                                            "IG-LOGIN-HTTP-" + code,
-                                            "Instagram 로그인 화면",
-                                            "로그인 페이지 요청의 HTTP 응답 코드: " + code
-                                        )
-                                    }
-
-                                    override fun onReceivedError(
-                                        view: WebView,
-                                        request: WebResourceRequest,
-                                        error: WebResourceError
-                                    ) {
-                                        if (!request.isForMainFrame) return
-                                        loading = false
-                                        errorStatus = "로그인 페이지 네트워크 오류 (" + error.errorCode + "): " + error.description
-                                        DiagnosticLog.record(
-                                            "IG-LOGIN-NET",
-                                            "Instagram 로그인 화면",
-                                            "WebView error " + error.errorCode + ": " + error.description
-                                        )
-                                    }
-
-                                    override fun onReceivedSslError(
-                                        view: WebView,
-                                        handler: SslErrorHandler,
-                                        error: SslError
-                                    ) {
-                                        handler.cancel()
-                                        loading = false
-                                        errorStatus = "로그인 페이지의 보안 인증서를 검증할 수 없습니다."
-                                        DiagnosticLog.record(
-                                            "IG-LOGIN-SSL",
-                                            "Instagram 로그인 화면",
-                                            "TLS certificate validation failed: " + error.primaryError
-                                        )
-                                    }
-
-                                    override fun onRenderProcessGone(
-                                        view: WebView,
-                                        detail: RenderProcessGoneDetail
-                                    ): Boolean {
-                                        DiagnosticLog.record(
-                                            "IG-LOGIN-RENDER",
-                                            "Instagram 로그인 화면",
-                                            "WebView 렌더러 종료됨 (crash=" + detail.didCrash() + ")"
-                                        )
-                                        loading = false
-                                        errorStatus = "웹 화면이 중지됐습니다. 새로고침을 눌러 주세요."
-                                        // A dead renderer cannot be reused. A new key
-                                        // creates a fresh WebView on the next retry.
-                                        return true
-                                    }
-                                }
-                                loadUrl(loginUrl)
-                            }
-                        },
-                        onRelease = { webView ->
-                            webView.stopLoading()
-                            webView.webChromeClient = null
-                            webView.webViewClient = WebViewClient()
-                            webView.destroy()
-                        }
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    ToolbarAction("외부에서 Instagram 상태 확인", true) {
-                        runCatching {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse(loginUrl))
-                                    .addCategory(Intent.CATEGORY_BROWSABLE)
-                            )
-                        }.onFailure {
-                            DiagnosticLog.failure(
-                                "IG-LOGIN-EXTERNAL", "Instagram 외부 페이지 확인", it
-                            )
-                        }
-                    }
-                }
-                Text(
-                    "외부 브라우저에서 페이지가 열리는지 비교할 수 있습니다. " +
-                        "외부 브라우저 로그인은 이 앱에 자동 연결되지 않습니다. " +
-                        "429가 나타나면 재시도를 멈추고 기다려 주세요.",
-                    style = TossType.Caption,
-                    color = Toss.Text3,
-                    modifier = Modifier.padding(12.dp)
-                )
-            }
-        }
-    }
-}
-
