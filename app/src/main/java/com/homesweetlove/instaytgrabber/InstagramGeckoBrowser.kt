@@ -102,6 +102,13 @@ fun InstagramGeckoBrowser(
                 "instagram-view@instaytgrabber.local"
             ).accept(
                 { extension ->
+                    if (extension == null) {
+                        DiagnosticLog.record(
+                            "IG-GECKO-EXT", "내장 미디어 확장",
+                            "GeckoView가 확장 프로그램 객체를 반환하지 않았습니다."
+                        )
+                        state = "미디어 확장 초기화 실패 · 오류 기록 확인"
+                    } else {
                     session.webExtensionController.setMessageDelegate(
                         extension,
                         object : WebExtension.MessageDelegate {
@@ -134,6 +141,7 @@ fun InstagramGeckoBrowser(
                         },
                         "instaytgrabber"
                     )
+                    }
                 },
                 { error ->
                     DiagnosticLog.failure("IG-GECKO-EXT", "내장 미디어 추출", error)
