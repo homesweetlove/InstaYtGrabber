@@ -4,11 +4,9 @@ import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -24,8 +22,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.homesweetlove.instaytgrabber.core.DiagnosticLog
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramDirectFileEngine
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramMediaLink
@@ -209,15 +205,10 @@ fun InstagramGeckoBrowser(
         }
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.White
     ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(0.98f).fillMaxHeight(0.96f),
-            shape = RoundedCornerShape(22.dp),
-            color = Color.White
-        ) {
             Column(Modifier.fillMaxSize().padding(top = 12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
@@ -265,6 +256,5 @@ fun InstagramGeckoBrowser(
                     modifier = Modifier.padding(12.dp)
                 )
             }
-        }
     }
 }
