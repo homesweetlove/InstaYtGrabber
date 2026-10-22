@@ -130,7 +130,6 @@ fun InstagramProfileBrowserScreen(
     var downloading by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf(IDLE_STATUS) }
     var task by remember { mutableStateOf<TaskState>(TaskState.Idle) }
-    var loginDialog by remember { mutableStateOf(false) }
     var loggedIn by remember { mutableStateOf(InstagramSession.isLoggedIn()) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -489,7 +488,14 @@ fun InstagramProfileBrowserScreen(
                         )
                         TossButton(
                             text = "Instagram 내부 브라우저 열기",
-                            onClick = { loginDialog = true },
+                            onClick = {
+                                context.startActivity(
+                                    Intent(context, InstagramBrowserActivity::class.java).apply {
+                                        putExtra(InstagramBrowserActivity.EXTRA_INITIAL_PROFILE,
+                                            directLink.ifBlank { url })
+                                    }
+                                )
+                            },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !downloading,
                             style = TossButtonStyle.Secondary
@@ -671,12 +677,6 @@ fun InstagramProfileBrowserScreen(
         TaskOverlay(state = task, onDismiss = { task = TaskState.Idle })
     }
 
-    if (loginDialog) {
-        InstagramGeckoBrowser(
-            initialProfile = directLink.takeIf { it.isNotBlank() } ?: url,
-            onDismiss = { loginDialog = false }
-        )
-    }
 }
 
 private fun LazyGridScope.fullWidth(content: @Composable () -> Unit) {
