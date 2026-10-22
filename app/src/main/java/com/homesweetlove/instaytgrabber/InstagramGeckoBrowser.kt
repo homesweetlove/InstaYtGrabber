@@ -68,7 +68,11 @@ fun InstagramGeckoBrowser(
     var media by remember { mutableStateOf<List<BrowserMedia>>(emptyList()) }
     var downloading by remember { mutableStateOf(false) }
     var account by remember { mutableStateOf(initialProfile) }
-    val session = remember { GeckoSession() }
+    // GeckoView needs an already-open session when the AndroidView attaches.
+    // Create it once in remember, not after AndroidView has been composed.
+    val session = remember {
+        GeckoSession().also { it.open(BrowserRuntime.get(context)) }
+    }
 
     DisposableEffect(session) {
         try {
@@ -93,8 +97,6 @@ fun InstagramGeckoBrowser(
                     }
                 }
             }
-            session.open(runtime)
-
             runtime.webExtensionController.ensureBuiltIn(
                 "resource://android/assets/instagram_gecko/",
                 "instagram-view@instaytgrabber.local"
