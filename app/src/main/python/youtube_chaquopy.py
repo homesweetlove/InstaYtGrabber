@@ -21,23 +21,18 @@ def _common(qjs_path="", ffmpeg_path="", cookie_header=""):
         "retries": 2,
         "fragment_retries": 2,
         "extractor_retries": 2,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["default", "android", "web_embedded"],
-            },
-        },
     }
 
-    if qjs_path and os.path.exists(qjs_path):
+    # Let yt-dlp select its maintained default clients / JS runtime where
+    # possible. An absent bundled qjs must not disable all runtime discovery.
+    if qjs_path and os.path.isfile(qjs_path) and os.access(qjs_path, os.X_OK):
         options["js_runtimes"] = {
             "quickjs": {
                 "path": qjs_path,
             },
         }
-    else:
-        options["js_runtimes"] = {}
 
-    if ffmpeg_path and os.path.exists(ffmpeg_path):
+    if ffmpeg_path and os.path.isfile(ffmpeg_path):
         options["ffmpeg_location"] = ffmpeg_path
 
     if cookie_header:
@@ -126,16 +121,21 @@ def download(
         })
 
         if mode == "video":
-            options["format"] = (
-                "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/"
-                "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
-                "best[ext=mp4]/best"
-            )
-            options["merge_output_format"] = "mp4"
+            if ffmpeg_path and os.path.isfile(ffmpeg_path):
+                options["format"] = (
+                    "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/"
+                    "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
+                    "best[ext=mp4]/best"
+                )
+                options["merge_output_format"] = "mp4"
+            else:
+                # Avoid selecting separate audio/video streams which cannot
+                # be merged on devices without an FFmpeg executable.
+                options["format"] = "best[ext=mp4]/best"
 
         elif mode == "audio":
-            if not ffmpeg_path:
-                raise RuntimeError("MP3 변환용 FFmpeg를 찾지 못했습니다.")
+            if not (ffmpeg_path and os.path.isfile(ffmpeg_path)):
+                raise RuntimeError("MP3 변환용 FFmpeg 실행 파일을 찾지 못했습니다.")
             options["format"] = "bestaudio/best"
             options["postprocessors"] = [{
                 "key": "FFmpegExtractAudio",

@@ -48,11 +48,49 @@ jobs:
           fi
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.13'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses >/dev/null || true
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Validate Python and QuickJS build script syntax
+        run: |
+          python -m compileall -q app/src/main/python
+          bash -n .github/scripts/build-quickjs-android.sh
+      - name: Install Android NDK and native build tools
+        run: |
+          sdkmanager "platforms;android-36" "ndk;27.2.12479018" "cmake;3.22.1" >/dev/null
+          command -v ninja >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y ninja-build)
+      - name: Build bundled QuickJS-NG runtime
+        run: bash .github/scripts/build-quickjs-android.sh
+      - name: Test username parsing and build debug APK
+        run: gradle :app:testDebugUnitTest :app:assembleDebug --stacktrace
+      - name: Upload installable test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: InstaYtGrabber-v0.4.2-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish directly installable PR test APK
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          VERSION=$(grep 'versionName = ' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+          APK_NAME="InstaYtGrabber-v${VERSION}-debug.apk"
+          RELEASE_TAG="test-pr-${PR_NUMBER}-latest"
+          cp app/build/outputs/apk/debug/app-debug.apk "$APK_NAME"
+          gh release delete "$RELEASE_TAG" --cleanup-tag -y || true
+          gh release create "$RELEASE_TAG" "$APK_NAME" \
+            --target "$HEAD_SHA" \
+            --title "InstaYtGrabber v${VERSION} Test APK" \
+            --notes "Experimental PR build for phone testing. Not a verified production release." \
+            --prerelease
       - name: Publish latest debug APK
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:

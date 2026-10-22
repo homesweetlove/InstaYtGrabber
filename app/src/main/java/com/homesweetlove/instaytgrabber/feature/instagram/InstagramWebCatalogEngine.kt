@@ -177,9 +177,6 @@ object InstagramWebCatalogEngine {
                         """
                         (() => {
                           try {
-                            history.pushState({}, '', '/$username/');
-                            window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
-
                             setTimeout(() => {
                               try {
                                 const bodyText = document.body?.innerText || '';
@@ -253,7 +250,8 @@ object InstagramWebCatalogEngine {
                 webView.post { cleanup() }
             }
 
-            webView.loadUrl("https://www.instagram.com/")
+            // Changing history alone does not load Instagram's profile data.
+            webView.loadUrl("https://www.instagram.com/$username/")
         }
     }
 
@@ -430,10 +428,7 @@ object InstagramWebCatalogEngine {
             settings.domStorageEnabled = true
             settings.loadsImagesAutomatically = true
             settings.mediaPlaybackRequiresUserGesture = true
-            settings.userAgentString =
-                "Mozilla/5.0 (Linux; Android 16; SM-S928N) " +
-                "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                "Chrome/140.0.0.0 Mobile Safari/537.36"
+            settings.userAgentString = InstagramBrowserConfig.mobileUserAgent(context)
             isClickable = false
             isFocusable = false
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -444,28 +439,31 @@ object InstagramWebCatalogEngine {
         root.addView(webView, 0, FrameLayout.LayoutParams(1080, 2200))
     }
 
-    private suspend fun prepareCookies(authenticated: Boolean) {
+    /**
+     * All WebViews share the application's CookieManager. Never clear its cookies
+     * during an anonymous lookup: doing so would also log the user out of the
+     * Instagram WebView login screen and cause repeated login prompts.
+     *
+     * A request made after sign-in may use the existing browser session even
+     * when authenticated=false; avoiding account-session destruction is safer
+     * than pretending this shared cookie jar can provide isolated guest mode.
+     */
+    private fun prepareCookies(authenticated: Boolean) {
         val manager = CookieManager.getInstance()
-
-        suspendCancellableCoroutine<Unit> { cont ->
-            manager.removeAllCookies {
-                if (authenticated) {
-                    InstagramSession.cookie()
-                        .orEmpty()
-                        .split(";")
-                        .map { value -> value.trim() }
-                        .filter { value -> value.contains("=") }
-                        .forEach { cookie ->
-                            manager.setCookie(
-                                "https://www.instagram.com",
-                                cookie + "; Domain=.instagram.com; Path=/; Secure"
-                            )
-                        }
-                    manager.flush()
+        manager.setAcceptCookie(true)
+        if (authenticated) {
+            InstagramSession.cookie()
+                .orEmpty()
+                .split(";")
+                .map { it.trim() }
+                .filter { it.contains("=") }
+                .forEach { cookie ->
+                    manager.setCookie(
+                        "https://www.instagram.com",
+                        cookie + "; Domain=.instagram.com; Path=/; Secure"
+                    )
                 }
-
-                if (cont.isActive) cont.resume(Unit)
-            }
+            manager.flush()
         }
     }
 
@@ -664,6 +662,9 @@ object InstagramWebCatalogEngine {
                     }
                   );
 
+                  if (response.status === 429) {
+                    throw new Error('HTTP 429: Instagram profile rate limited');
+                  }
                   if (!response.ok) return;
                   const payload = await response.json();
                   walk(payload);
@@ -675,7 +676,8 @@ object InstagramWebCatalogEngine {
                   let maxId = null;
                   const seenCursors = new Set();
 
-                  for (let page = 0; page < 300; page++) {
+                  // Make a bounded initial request rather than hundreds of pages.
+                  for (let page = 0; page < 8; page++) {
                     let feedUrl =
                       '/api/v1/feed/user/' +
                       encodeURIComponent(String(userId)) +
@@ -694,6 +696,9 @@ object InstagramWebCatalogEngine {
                       }
                     });
 
+                    if (feedResponse.status === 429) {
+                      throw new Error('HTTP 429: Instagram feed rate limited');
+                    }
                     if (!feedResponse.ok) break;
 
                     const feed = await feedResponse.json();
@@ -707,9 +712,11 @@ object InstagramWebCatalogEngine {
                     seenCursors.add(String(next));
                     maxId = next;
 
-                    await new Promise((resolve) => setTimeout(resolve, 650));
+                    await new Promise((resolve) => setTimeout(resolve, 1200));
                   }
-                } catch (_) {}
+                } catch (e) {
+                  if (String(e).includes('429')) throw e;
+                }
               }
 
               function collectDom() {
@@ -748,7 +755,8 @@ object InstagramWebCatalogEngine {
                     IYGBridge.onProgress(found.size);
                   }
 
-                  for (let i = 0; i < 300; i++) {
+                  // Limit automatic scrolls to protect from rate limiting.
+                  for (let i = 0; i < 30; i++) {
                     collectDom();
 
                     if (found.size !== previous) {
@@ -762,7 +770,7 @@ object InstagramWebCatalogEngine {
                     if (stable >= 16) break;
 
                     window.scrollTo(0, document.documentElement.scrollHeight);
-                    await new Promise((resolve) => setTimeout(resolve, 550));
+                    await new Promise((resolve) => setTimeout(resolve, 1100));
                   }
 
                   collectDom();

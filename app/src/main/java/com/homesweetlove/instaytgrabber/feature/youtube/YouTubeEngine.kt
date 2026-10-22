@@ -90,6 +90,10 @@ object YouTubeEngine {
     ): Result<File> {
         require(accepts(url)) { "YouTube 링크를 입력해 주세요." }
 
+        if (type == YouTubeMediaType.THUMBNAIL) {
+            return YouTubeThumbnailEngine.download(url.trim(), onProgress)
+        }
+
         val inspected = inspect(url) { status ->
             onProgress(GrabProgress(percent = 0f, line = status))
         }

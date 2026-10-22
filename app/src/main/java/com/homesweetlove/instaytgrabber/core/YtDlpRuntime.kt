@@ -8,6 +8,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 interface YtDlpProgressListener {
     fun onProgress(percent: Double, etaSeconds: Long, line: String)
@@ -26,6 +27,32 @@ object YtDlpRuntime {
             .takeIf { it.isFile }
             ?.absolutePath
             .orEmpty()
+
+    private fun assertQuickJsReady() {
+        val qjs = qjsPath()
+        check(qjs.isNotBlank()) {
+            "QuickJS 실행 파일이 APK에 없습니다. GitHub Actions에서 QuickJS가 포함된 APK를 빌드해 주세요."
+        }
+        val process = try {
+            ProcessBuilder(qjs, "-e", "print(2 + 2)")
+                .redirectErrorStream(true)
+                .start()
+        } catch (error: Exception) {
+            throw IllegalStateException("QuickJS 실행 실패: ${error.message}", error)
+        }
+        try {
+            if (!process.waitFor(6, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                error("QuickJS 실행 확인 시간 초과")
+            }
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            check(process.exitValue() == 0 && output.trim() == "4") {
+                "QuickJS 실행 확인 실패: ${output.take(300)}"
+            }
+        } finally {
+            process.destroy()
+        }
+    }
 
     private fun ffmpegPath(): String =
         File(appContext.applicationInfo.nativeLibraryDir, "libffmpeg.so")
@@ -110,6 +137,13 @@ object YtDlpRuntime {
                         )
                     )
                 }
+            }
+
+            if (url.contains("youtube.com/", ignoreCase = true) ||
+                url.contains("youtu.be/", ignoreCase = true)
+            ) {
+                assertQuickJsReady()
+                onProgress(GrabProgress(percent = 0f, line = "QuickJS 실행 환경 확인 완료"))
             }
 
             val raw = Python.getInstance()

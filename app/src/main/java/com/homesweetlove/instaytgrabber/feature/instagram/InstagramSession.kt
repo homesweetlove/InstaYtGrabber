@@ -11,13 +11,25 @@ object InstagramSession {
             .getCookie("https://www.instagram.com")
             ?.trim()
             .orEmpty()
-        cookieHeader = cookies.ifBlank { null }
-        return cookieHeader != null
+        // Guest cookies do not mean the user successfully logged in.
+        val hasSession = cookies.split(";").any { part ->
+            part.trim().startsWith("sessionid=") &&
+                part.substringAfter("=", "").isNotBlank()
+        }
+        cookieHeader = cookies.takeIf { hasSession }
+        return hasSession
     }
 
-    fun cookie(): String? = cookieHeader
+    // Android WebView persists cookies between app launches, unlike this
+    // process-local field. Recover the session without storing credentials.
+    fun cookie(): String? {
+        if (cookieHeader.isNullOrBlank()) {
+            captureFromWebView()
+        }
+        return cookieHeader
+    }
 
-    fun isLoggedIn(): Boolean = !cookieHeader.isNullOrBlank()
+    fun isLoggedIn(): Boolean = !cookie().isNullOrBlank()
 
     fun clear() {
         cookieHeader = null

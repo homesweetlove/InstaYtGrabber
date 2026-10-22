@@ -1,6 +1,15 @@
 package com.homesweetlove.instaytgrabber
 
+import android.content.Intent
+import android.net.Uri
+import android.net.http.SslError
 import android.webkit.CookieManager
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.SslErrorHandler
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
@@ -30,8 +39,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -50,15 +61,20 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.homesweetlove.instaytgrabber.core.DiagnosticLog
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramBrowserConfig
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramCatalogItem
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramCatalogSection
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramDirectFileEngine
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramEngine
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramInstaloaderMediaEngine
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramMediaLink
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramMediaType
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramOutputType
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileCatalog
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileCatalogEngine
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramProfileInput
+import com.homesweetlove.instaytgrabber.feature.instagram.InstagramRateLimit
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramSession
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramWebMediaEngine
 import com.homesweetlove.instaytgrabber.ui.BottomCta
@@ -89,15 +105,19 @@ private enum class InstagramSection(
     REEL("릴스", InstagramCatalogSection.REELS)
 }
 
-private const val IDLE_STATUS = "공개 프로필은 로그인 없이 익명으로 조회해요"
+private const val IDLE_STATUS = "공개 계정의 게시글·릴스는 로그인 없이도 조회할 수 있어요"
 
 @Composable
 fun InstagramProfileBrowserScreen(
     initialUrl: String,
     header: @Composable () -> Unit = {}
 ) {
-    var url by remember { mutableStateOf(initialUrl) }
-    var section by remember { mutableStateOf(InstagramSection.STORY) }
+    val incomingMedia = remember(initialUrl) { InstagramMediaLink.parse(initialUrl) }
+    var url by remember { mutableStateOf(if (incomingMedia == null) initialUrl else "") }
+    var directLink by remember { mutableStateOf(incomingMedia?.canonicalUrl.orEmpty()) }
+    var directLinkStatus by remember { mutableStateOf("") }
+    var resolvedProfileUrl by remember { mutableStateOf("") }
+    var section by remember { mutableStateOf(InstagramSection.POST) }
     var profile by remember { mutableStateOf<InstagramProfileCatalog?>(null) }
     var stories by remember { mutableStateOf<List<InstagramCatalogItem>>(emptyList()) }
     var highlights by remember { mutableStateOf<List<InstagramCatalogItem>>(emptyList()) }
@@ -110,10 +130,99 @@ fun InstagramProfileBrowserScreen(
     var downloading by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf(IDLE_STATUS) }
     var task by remember { mutableStateOf<TaskState>(TaskState.Idle) }
-    var loginDialog by remember { mutableStateOf(false) }
     var loggedIn by remember { mutableStateOf(InstagramSession.isLoggedIn()) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    fun downloadDirectLink() {
+        val media = InstagramMediaLink.parse(directLink)
+        if (media == null) {
+            directLinkStatus = "Instagram 게시글 또는 릴스 링크를 입력해 주세요."
+            DiagnosticLog.record("IG-LINK-INPUT", "게시물·릴스 링크", "올바르지 않은 게시글 또는 릴스 주소")
+            return
+        }
+        if (InstagramRateLimit.shouldSkipMedia()) {
+            directLinkStatus = "해당 미디어 요청에서 HTTP 429가 발생했습니다. " +
+                "약 " + InstagramRateLimit.mediaRemainingMinutes() +
+                "분간 미디어 재요청을 중단합니다. 실제 제한 시간은 서버가 결정합니다."
+            return
+        }
+        scope.launch {
+            downloading = true
+            directLinkStatus = ""
+            task = TaskState.Running(
+                title = media.type.label + " 저장 중",
+                detail = "원본 미디어 정보를 확인하고 있어요",
+                progress = 0f
+            )
+            val progressCallback: (com.homesweetlove.instaytgrabber.core.GrabProgress) -> Unit =
+                { progress ->
+                    task = TaskState.Running(
+                        title = media.type.label + " 저장 중",
+                        detail = progress.line,
+                        progress = (progress.percent / 100f).coerceIn(0f, 1f)
+                    )
+                }
+            // Single-media embeds do not require a profile-info request.
+            // Try the real Chromium page before the Python REST extractors.
+            val embedded = InstagramWebMediaEngine.download(
+                context = context,
+                pageUrl = media.canonicalUrl,
+                folderName = media.type.folder + "/media",
+                baseName = "chrome_shared_" + System.currentTimeMillis(),
+                authenticated = InstagramSession.isLoggedIn(),
+                onProgress = progressCallback
+            )
+            val result = if (embedded.isSuccess || InstagramRateLimit.shouldSkipMedia()) {
+                embedded
+            } else {
+                embedded.exceptionOrNull()?.let { error ->
+                    DiagnosticLog.failure(
+                        "IG-EMBED-01", "단일 게시물 / 브라우저 embed 추출", error
+                    )
+                }
+                InstagramEngine.download(
+                    url = media.canonicalUrl,
+                    type = media.type,
+                    output = InstagramOutputType.MEDIA,
+                    allowAuthenticatedFallback = InstagramSession.isLoggedIn(),
+                    onProgress = progressCallback
+                )
+            }
+            result.fold(
+                onSuccess = {
+                    task = TaskState.Done(
+                        title = "저장 요청 완료",
+                        detail = "다운로드 폴더를 확인해 주세요.",
+                        location = "다운로드 › InstaYtGrabber › Instagram"
+                    )
+                    directLinkStatus = "다운로드가 완료됐어요."
+                },
+                onFailure = { error ->
+                    if (error.message.orEmpty().contains("429") ||
+                        error.message.orEmpty().contains("Too Many Requests", ignoreCase = true)) {
+                        InstagramRateLimit.onMedia429()
+                        DiagnosticLog.record(
+                            "IG-LINK-429",
+                            "Instagram 단일 미디어 링크",
+                            "Instagram 서버에서 HTTP 429 제한이 발생해 요청을 중단했습니다."
+                        )
+                    }
+                    DiagnosticLog.failure(
+                        "IG-LINK-DOWNLOAD", "Instagram 단일 미디어 " + media.type.label, error
+                    )
+                    task = TaskState.Failed(
+                        title = "링크 저장에 실패했어요",
+                        detail = if (InstagramRateLimit.shouldSkipMedia()) {
+                            "Instagram 서버 요청 제한(429)입니다. 잠시 쉬었다가 다시 시도해 주세요."
+                        } else error.message ?: "원본을 가져올 수 없습니다."
+                    )
+                    directLinkStatus = "실패했어요. 오류 기록을 확인해 주세요."
+                }
+            )
+            downloading = false
+        }
+    }
 
     fun sectionItems(target: InstagramSection): List<InstagramCatalogItem> =
         when (target) {
@@ -131,13 +240,24 @@ fun InstagramProfileBrowserScreen(
         val current = base ?: return
         if (!force && (target in loadedSections || target in loadingSections)) return
 
+        // Public Instagram stories and highlights are often protected by a
+        // logged-in session. This is not evidence that the profile is private.
+        // Do not issue anonymous API calls or write a misleading failure log.
+        if ((target == InstagramSection.STORY || target == InstagramSection.HIGHLIGHT) &&
+            !InstagramSession.isLoggedIn()
+        ) {
+            status = target.label + "는 Instagram 로그인 연결 후 조회할 수 있어요. " +
+                "게시글·릴스는 로그인 없이도 시도할 수 있어요."
+            return
+        }
+
         scope.launch {
             loadingSections = loadingSections + target
             status = target.label + " 전체 불러오는 중…"
 
             InstagramProfileCatalogEngine.loadSection(
                 context = context,
-                profileUrl = url,
+                profileUrl = resolvedProfileUrl.ifBlank { url },
                 section = target.catalogSection,
                 isPrivate = current.isPrivate,
                 onProgress = { count ->
@@ -155,6 +275,7 @@ fun InstagramProfileBrowserScreen(
                     status = target.label + " " + items.size + "개 불러옴"
                 },
                 onFailure = { error ->
+                    DiagnosticLog.failure("IG-UI-SECTION", target.label + " 목록 불러오기", error)
                     status = target.label + " 불러오기 실패 · " +
                         (error.message ?: error.javaClass.simpleName)
                 }
@@ -166,6 +287,13 @@ fun InstagramProfileBrowserScreen(
 
     fun loadProfile() {
         scope.launch {
+            val canonicalUrl = runCatching { InstagramProfileInput.normalize(url) }
+                .getOrElse { error ->
+                    DiagnosticLog.failure("IG-INPUT-01", "프로필 아이디 확인", error)
+                    status = "아이디 확인 실패 · " + (error.message ?: "입력을 확인해 주세요.")
+                    return@launch
+                }
+            resolvedProfileUrl = canonicalUrl
             baseLoading = true
             profile = null
             stories = emptyList()
@@ -175,16 +303,17 @@ fun InstagramProfileBrowserScreen(
             loadedSections = emptySet()
             loadingSections = emptySet()
             selected = emptySet()
-            section = InstagramSection.STORY
+            section = InstagramSection.POST
             status = "프로필 정보 불러오는 중…"
 
-            InstagramProfileCatalogEngine.loadBase(context, url).fold(
+            InstagramProfileCatalogEngine.loadBase(context, canonicalUrl).fold(
                 onSuccess = { loaded ->
                     profile = loaded
                     status = "@" + loaded.username + " 프로필 불러옴"
-                    loadSection(InstagramSection.STORY, loaded)
+                    loadSection(InstagramSection.POST, loaded)
                 },
                 onFailure = { error ->
+                    DiagnosticLog.failure("IG-UI-PROFILE", "프로필 불러오기", error)
                     status = "프로필 불러오기 실패 · " +
                         (error.message ?: error.javaClass.simpleName)
                 }
@@ -305,6 +434,7 @@ fun InstagramProfileBrowserScreen(
                 } else {
                     failed++
                     lastError = result.exceptionOrNull()?.message.orEmpty()
+                    DiagnosticLog.failure("IG-UI-DOWNLOAD", "선택 항목 다운로드 / " + item.kind, result.exceptionOrNull())
                 }
             }
 
@@ -343,12 +473,70 @@ fun InstagramProfileBrowserScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     TossCard {
-                        SectionTitle("프로필 링크")
+                        SectionTitle("1. 앱 안에서 로그인 · 탐색 · 저장")
+                        Text(
+                            "앱 안에 Firefox 엔진을 내장했습니다. 같은 화면에서 로그인하고 프로필, 게시글, " +
+                                "릴스를 탐색한 뒤 현재 미디어를 저장할 수 있어요. 외부 브라우저는 필요하지 않습니다.",
+                            style = TossType.Caption,
+                            color = Toss.Text3
+                        )
                         TossTextField(
                             value = url,
                             onValueChange = { url = it },
-                            placeholder = "instagram.com/username",
+                            placeholder = "아이디 · @아이디 · instagram.com/아이디",
                             enabled = !baseLoading && !downloading
+                        )
+                        TossButton(
+                            text = "Instagram 내부 브라우저 열기",
+                            onClick = {
+                                context.startActivity(
+                                    Intent(context, InstagramBrowserActivity::class.java).apply {
+                                        putExtra(InstagramBrowserActivity.EXTRA_INITIAL_PROFILE,
+                                            directLink.ifBlank { url })
+                                    }
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !downloading,
+                            style = TossButtonStyle.Secondary
+                        )
+                        SectionTitle("게시글·릴스 링크 저장")
+                        TossTextField(
+                            value = directLink,
+                            onValueChange = { directLink = it },
+                            placeholder = "https://www.instagram.com/reel/...",
+                            enabled = !downloading
+                        )
+                        TossButton(
+                            text = "이 링크 저장하기",
+                            onClick = { downloadDirectLink() },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = directLink.isNotBlank() && !downloading
+                        )
+                        Text(
+                            "아래 단일 링크 저장은 별도 엔진을 사용합니다. " +
+                                "기존 WebView·Python 조회가 제한될 경우 위의 내장 브라우저를 이용하세요.",
+                            style = TossType.Caption,
+                            color = Toss.Text3
+                        )
+                        if (directLinkStatus.isNotBlank()) {
+                            Text(
+                                directLinkStatus,
+                                style = TossType.Caption,
+                                color = if (directLinkStatus.contains("실패") ||
+                                    directLinkStatus.contains("제한")
+                                ) Toss.Red else Toss.Text2
+                            )
+                        }
+                    }
+
+                    TossCard {
+                        SectionTitle("2. 프로필 전체 목록 불러오기 (실험적)")
+                        Text(
+                            "Instagram 프로필 API는 로그인하지 않은 앱에서 429를 반환할 수 있어요. " +
+                                "위의 앱 내부 브라우저에서 로그인·탐색·저장을 먼저 시도해 주세요.",
+                            style = TossType.Caption,
+                            color = Toss.Text3
                         )
                         TossButton(
                             text = when {
@@ -376,16 +564,7 @@ fun InstagramProfileBrowserScreen(
                         }
                     }
 
-                    AccountCard(
-                        loggedIn = loggedIn,
-                        enabled = !baseLoading && !downloading,
-                        onLogin = { loginDialog = true },
-                        onLogout = {
-                            InstagramSession.clear()
-                            loggedIn = false
-                            status = "로그인 세션을 삭제했어요"
-                        }
-                    )
+
 
                     profile?.let { current ->
                         ProfileCard(current)
@@ -438,8 +617,16 @@ fun InstagramProfileBrowserScreen(
                 if (visibleItems.isEmpty() && !currentSectionLoading) {
                     fullWidth {
                         Text(
-                            if (section in loadedSections) "표시할 " + section.label + " 항목이 없어요"
-                            else "목록을 불러오지 못했어요. 새로고침을 눌러 주세요",
+                            if ((section == InstagramSection.STORY || section == InstagramSection.HIGHLIGHT) &&
+                                !loggedIn
+                            ) {
+                                "공개 계정이어도 " + section.label +
+                                    "는 Instagram 로그인이 필요할 수 있어요. 위의 계정 연결에서 로그인해 주세요."
+                            } else if (section in loadedSections) {
+                                "표시할 " + section.label + " 항목이 없어요"
+                            } else {
+                                "목록을 불러오지 못했어요. 새로고침을 눌러 주세요"
+                            },
                             style = TossType.BodyRegular,
                             color = Toss.Text3,
                             textAlign = TextAlign.Center,
@@ -473,9 +660,9 @@ fun InstagramProfileBrowserScreen(
             BottomCta(
                 modifier = Modifier.align(Alignment.BottomCenter),
                 caption = if (loggedIn) {
-                    "공개 프로필은 로그인 쿠키 없이 저장하고, 비공개 프로필만 연결한 세션을 사용해요"
+                    "로그인이 연결되어 있어요 · 스토리·하이라이트도 조회해 보세요"
                 } else {
-                    "공개 프로필은 익명으로 저장해요 · 기록은 남기지 않아요"
+                    "공개 게시글·릴스는 로그인 없이 조회를 시도해요"
                 }
             ) {
                 TossButton(
@@ -490,21 +677,6 @@ fun InstagramProfileBrowserScreen(
         TaskOverlay(state = task, onDismiss = { task = TaskState.Idle })
     }
 
-    if (loginDialog) {
-        ProfileInstagramLoginDialog(
-            onDismiss = { loginDialog = false },
-            onUseSession = {
-                loggedIn = InstagramSession.captureFromWebView()
-                status = if (loggedIn) {
-                    "Instagram 임시 로그인을 연결했어요"
-                } else {
-                    "로그인 세션을 찾지 못했어요"
-                }
-                loginDialog = false
-                if (loggedIn && url.isNotBlank()) loadProfile()
-            }
-        )
-    }
 }
 
 private fun LazyGridScope.fullWidth(content: @Composable () -> Unit) {
@@ -539,9 +711,9 @@ private fun AccountCard(
         ) {
             IconTile(Toss.Grey) { InstagramGlyph(20.dp) }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Instagram 로그인", style = TossType.Body, color = Toss.Text1)
+                Text("앱 내 Instagram 로그인", style = TossType.Body, color = Toss.Text1)
                 Text(
-                    if (loggedIn) "비공개 계정에만 세션을 사용해요" else "비공개 계정을 볼 때만 필요해요",
+                    if (loggedIn) "앱 내 로그인 세션 연결됨 (Chrome 세션과 별개)" else "일부 환경에서 웹 로그인이 차단됩니다. Chrome 탐색을 이용해 주세요",
                     style = TossType.Sub,
                     color = Toss.Text3
                 )
@@ -860,55 +1032,3 @@ private fun MediaBadge(text: String, video: Boolean = false) {
 
 private fun InstagramCatalogItem.selectionKey(): String =
     kind + "|" + id + "|" + targetUrl
-
-@Composable
-private fun ProfileInstagramLoginDialog(
-    onDismiss: () -> Unit,
-    onUseSession: () -> Unit
-) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.92f)
-                .padding(horizontal = 12.dp),
-            shape = RoundedCornerShape(22.dp),
-            color = Color.White
-        ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 20.dp, end = 12.dp, top = 16.dp, bottom = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("Instagram 로그인", style = TossType.Name.copy(fontSize = TossType.Button.fontSize), color = Toss.Text1)
-                        Text("로그인한 뒤 '세션 사용'을 눌러 주세요", style = TossType.Sub, color = Toss.Text3)
-                    }
-                    ToolbarAction("닫기", true, onDismiss)
-                    TossButton(text = "세션 사용", onClick = onUseSession, compact = true)
-                }
-
-                AndroidView(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    factory = { context ->
-                        CookieManager.getInstance().setAcceptCookie(true)
-                        WebView(context).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            webViewClient = WebViewClient()
-                            loadUrl("https://www.instagram.com/accounts/login/")
-                        }
-                    }
-                )
-            }
-        }
-    }
-}

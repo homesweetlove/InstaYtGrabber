@@ -23,7 +23,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +37,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
+import com.homesweetlove.instaytgrabber.core.DiagnosticLog
 import com.homesweetlove.instaytgrabber.feature.instagram.InstagramEngine
 import coil.compose.AsyncImage
 import com.homesweetlove.instaytgrabber.feature.youtube.YouTubeEngine
@@ -62,6 +66,9 @@ import com.homesweetlove.instaytgrabber.ui.YouTubeGlyph
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private var incomingUrl by mutableStateOf("")
+    private var incomingVersion by mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.light(
@@ -77,15 +84,29 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 100)
         }
-        val sharedUrl = if (intent?.action == Intent.ACTION_SEND) {
-            intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
-        } else {
-            ""
-        }
+        incomingUrl = sharedLink(intent)
 
         setContent {
-            InstaYtGrabberApp(sharedUrl)
+            key(incomingVersion) {
+                InstaYtGrabberApp(incomingUrl)
+            }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        incomingUrl = sharedLink(intent)
+        incomingVersion++
+    }
+
+    private fun sharedLink(intent: Intent?): String {
+        if (intent?.action != Intent.ACTION_SEND) return ""
+        val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
+        return Regex("""https?://\S+""").findAll(sharedText)
+            .map { it.value.trimEnd('.', ',', ')', ']', '>', '"') }
+            .firstOrNull { InstagramEngine.accepts(it) || YouTubeEngine.accepts(it) }
+            .orEmpty()
     }
 }
 
@@ -102,8 +123,9 @@ private fun InstaYtGrabberApp(sharedUrl: String) {
         else -> PlatformTab.INSTAGRAM
     }
     var tab by remember { mutableStateOf(initialTab) }
+    var showDiagnostics by remember { mutableStateOf(false) }
     val header: @Composable () -> Unit = {
-        AppHeader(tab = tab, onTab = { tab = it })
+        AppHeader(tab = tab, onTab = { tab = it }, onLogs = { showDiagnostics = true })
     }
 
     GrabberTheme {
@@ -124,13 +146,14 @@ private fun InstaYtGrabberApp(sharedUrl: String) {
                     header = header
                 )
             }
+            if (showDiagnostics) DiagnosticScreen(onClose = { showDiagnostics = false })
         }
     }
 }
 
 /** Brand row + large title + platform segmented control. Scrolls with the page. */
 @Composable
-fun AppHeader(tab: PlatformTab, onTab: (PlatformTab) -> Unit) {
+fun AppHeader(tab: PlatformTab, onTab: (PlatformTab) -> Unit, onLogs: () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 18.dp, bottom = 20.dp),
@@ -144,6 +167,13 @@ fun AppHeader(tab: PlatformTab, onTab: (PlatformTab) -> Unit) {
                 BrandMark()
                 Text("InstaYtGrabber", style = TossType.Section.copy(letterSpacing = TossType.Sub.letterSpacing), color = Toss.Text2)
                 Spacer(Modifier.weight(1f))
+                TextButton(onClick = onLogs) {
+                    Text(
+                        "오류 기록" + if (DiagnosticLog.entries.isEmpty()) "" else " (${DiagnosticLog.entries.size})",
+                        style = TossType.Caption,
+                        color = Toss.Blue
+                    )
+                }
                 Text("v" + BuildConfig.VERSION_NAME, style = TossType.Caption, color = Toss.Text4)
             }
             Text("어떤 걸\n저장할까요?", style = TossType.Title, color = Toss.Text1)
@@ -282,6 +312,7 @@ private fun YouTubeScreen(initialUrl: String, header: @Composable () -> Unit) {
                                         inspectStatus = "조회 완료"
                                     },
                                     onFailure = {
+                                        DiagnosticLog.failure("YT-INSPECT-01", "YouTube 정보 조회", it)
                                         inspectError = it.message ?: it.javaClass.simpleName
                                         inspectStatus = ""
                                     }
@@ -362,7 +393,9 @@ private fun YouTubeScreen(initialUrl: String, header: @Composable () -> Unit) {
             TossButton(
                 text = type.actionLabel,
                 modifier = Modifier.weight(1f),
-                enabled = url.isNotBlank() && !invalidUrl && info != null && !running && !inspecting,
+                enabled = url.isNotBlank() && !invalidUrl &&
+                    (info != null || type == YouTubeMediaType.THUMBNAIL) &&
+                    !running && !inspecting,
                 onClick = {
                     val target = type
                     scope.launch {
@@ -390,6 +423,7 @@ private fun YouTubeScreen(initialUrl: String, header: @Composable () -> Unit) {
                                 )
                             },
                             onFailure = {
+                                DiagnosticLog.failure("YT-DOWNLOAD-01", "YouTube / " + target.name, it)
                                 TaskState.Failed(
                                     title = "저장하지 못했어요",
                                     detail = it.message ?: it.javaClass.simpleName

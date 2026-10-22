@@ -62,11 +62,30 @@ Android Studio에서 프로젝트를 열고 Gradle Sync 후 실행합니다.
 
 로컬 CLI 빌드에는 JDK 17과 Python 3.11이 필요합니다.
 
+### YouTube JavaScript 실행 환경
+
+YouTube는 최신 yt-dlp에서 JavaScript 챌린지 해결용 외부 실행 환경이 필요합니다.
+이 프로젝트는 [QuickJS-NG v0.17.0](https://github.com/quickjs-ng/quickjs/releases/tag/v0.17.0)의 공식 소스를 Android NDK로 직접 크로스 컴파일합니다.
+다른 Android 다운로더의 GPL 코드를 프로젝트에 복사하지 않았습니다.
+
+- 원본: `quickjs-ng/quickjs` (MIT 라이선스)
+- 고정 소스 커밋: `6d46d07d04041b40f4f49eaa7fdebe44c314c699`
+- 지원 ABI: `arm64-v8a`, `armeabi-v7a`, `x86_64`
+- 출력 위치: `app/src/main/jniLibs/<ABI>/libqjs.so`
+- yt-dlp: `2026.08.19`, yt-dlp-ejs: `0.8.0` (버전 일치 필요)
+
+GitHub Actions는 APK 빌드 전에 자동으로 QuickJS를 컴파일합니다. 로컬 개발에서는 **Android NDK 27.2.12479018**, `cmake`, `ninja`, `git`, Bash를 준비하고 아래 순서대로 실행하세요.
+
 ```bash
+bash .github/scripts/build-quickjs-android.sh
 gradle :app:assembleDebug
 ```
 
-GitHub Actions도 `main` push 시 자동으로 debug APK를 빌드하며, 성공한 run의 **Artifacts → InstaYtGrabber-debug**에서 APK를 받을 수 있습니다.
+QuickJS가 없거나 Android에서 실행할 수 없으면 YouTube 영상·음원 저장 전에 오류 메시지를 표시합니다.
+빌드 성공만으로 YouTube 다운로드 성공이 보장되는 것은 아니며 실기기 테스트가 필요합니다.
+Instagram 사진·영상 저장은 QuickJS와 별도인 gallery-dl 경로를 사용합니다.
+
+GitHub Actions는 `main` push 시 debug APK를 빌드하고, 성공하면 [GitHub Releases → debug-latest](https://github.com/homesweetlove/InstaYtGrabber/releases/tag/debug-latest)에 업로드합니다. PR에서는 빌드만 확인하며 APK 릴리스를 만들지 않습니다.
 
 ## 개인정보 처리 방향
 - 별도 백엔드 없음
@@ -83,3 +102,115 @@ GitHub Actions도 `main` push 시 자동으로 debug APK를 빌드하며, 성공
 
 ## 라이선스 참고
 이 프로젝트가 사용하는 오픈소스 구성요소에는 각각의 라이선스가 적용됩니다. 특히 gallery-dl은 GPL 계열 라이선스를 사용하므로 APK를 제3자에게 배포할 계획이라면 해당 라이선스 의무를 확인하세요.
+
+
+## 오류 기록 및 문제 신고 (v0.3.5)
+
+앱 상단의 **오류 기록**을 누르면 Instagram 프로필·목록·다운로드와 YouTube 조회·다운로드 실패 기록을 확인할 수 있습니다.
+
+- 단계별 오류 코드: `IG-BASE-01~06`, `IG-SEC-*`, `IG-UI-*`, `YT-*`
+- 발생 시각과 오류 메시지 표시, 전체 복사, 기록 삭제
+- 기록은 서버로 전송되지 않고 **앱 내부 저장소에 최근 7일 / 최대 120건**만 보관
+- 오류 메시지는 전체 URL, 계정 표시, 세션 토큰 및 쿠키를 최대한 가려서 저장합니다. 복사 후에도 민감한 정보가 남지 않았는지 확인하고 공유하세요.
+- 앱을 삭제하면 로그도 삭제됩니다. 로그는 다운로드한 미디어나 다운로드 내역을 저장하지 않습니다.
+
+**Instagram 웹 프로필 폴백**은 홈에서 주소만 바꾸는 방식에서 실제 프로필 페이지로 이동하는 방식으로 변경되었습니다. 실기기에서 다시 확인해야 합니다.
+
+### 프로필 아이디 직접 입력 (v0.3.5)
+
+Instagram 탭의 **프로필 아이디 또는 링크** 입력란은 다음 형태를 모두 지원합니다.
+
+- `example_user`
+- `@example_user`
+- `instagram.com/example_user`
+- `https://www.instagram.com/example_user/?utm_source=share`
+
+앱은 모두 `https://www.instagram.com/example_user/`로 변환해 프로필을 조회합니다.
+게시글/릴스 링크와 Instagram 외 사이트는 프로필 검색에서 거부하며, 잘못된 입력은 `IG-INPUT-01` 오류 코드로 기록합니다.
+
+## v0.3.6 Instagram 429·로그인 상태 수정
+
+- **공개 프로필은 게시글 탭을 기본으로 표시:** 스토리 자동 조회에 의한 불필요한 로그인 오류 제거
+- **스토리·하이라이트는 로그인 세션이 필요할 수 있음:** 계정이 비공개라는 뜻이 아니며, 미로그인 상태에서는 불필요한 익명 API 요청을 하지 않음
+- **429 Too Many Requests:** Instaloader가 429를 받으면 같은 엔진의 반복 호출을 15분간 제한하고, 제한 시간은 앱 재실행 후에도 유지
+- **로그인 세션 유지:** 앱 시작 시 쿠키를 삭제하던 문제와 WebView가 공개 프로필 조회 중 전체 쿠키를 지우던 문제 제거. 로그인은 사용자가 명시적으로 로그아웃할 때까지 WebView 쿠키 저장소에 보존
+- **최신 엔진:** Instaloader 4.15.4 / gallery-dl 1.32.17
+- 429 제한을 무력화하지 않습니다. 네트워크·IP·세션 제한은 Instagram 서비스가 결정합니다.
+- 이전 버전이 앱 실행 중 로그인을 지웠다면 v0.3.6 설치 후 Instagram 로그인을 **한 번 다시 연결**해야 합니다.
+
+## v0.3.7: Instagram 로그인 흰 화면·게시글 429 진단
+
+- **로그인 화면:** Android 기본 WebView의 `wv` 식별 토큰을 제거하고 기기에 설치된 Chromium 버전을 그대로 사용하는 모바일 브라우저 UA 적용
+- **빈 화면 진단:** 로딩 진행률, 새로고침, 세션 확인, 주 화면 HTTP/네트워크/TLS/렌더러 오류 코드 표시. 화면이 계속 비어 있으면 `IG-LOGIN-BLANK` 기록
+- **세션 연결:** 로그인이 실제 완료되어 `sessionid` 쿠키가 생겼을 때만 연결 성공 처리하며 자동으로 앱에 돌아감. 로그인 전에 '세션 확인'을 누른 것은 로그인 성공으로 간주하지 않음
+- **로그인 창을 닫지 않고 오류 기록 확인 가능:** 오류 코드를 복사해 문제 분석에 사용
+- **공개 게시물 조회:** WebView의 자동 내부 API 페이지 조회 최대 300회→8회, 자동 스크롤 최대 300회→30회로 제한하고 조회 간격 증가. 큰 계정의 목록은 첫 요청에서 일부만 표시될 수 있으며 후속 페이지네이션은 개선 과제로 남김
+- **429 요청 제한:** 로그인되지 않은 경우 서버에서 429를 받으면 약 15분간 추가 자동 조회를 중단하고 남은 시간을 안내. 이 제한은 기기에서 과도한 재시도를 피하기 위한 것으로 Instagram 서버의 제한 해제를 보장하지 않음
+
+Instagram이 Android 내장 브라우저 로그인을 차단하거나 보안 확인을 요구하는 경우 앱에서 이를 우회할 수 없습니다. WebView 로그와 UI 메시지를 확인해 주세요. Android System WebView/Chrome 업데이트도 도움이 될 수 있습니다.
+
+## v0.3.8: 로그인 페이지 HTTP 429 진단 및 재시도 중단
+
+실제 v0.3.7 오류 기록에서 Instagram 로그인 페이지 **메인 프레임**이 HTTP 429를 반환한 것이 확인되었습니다. 이는 앱이 계정을 비공개로 오인한 것과 다르며, 서비스 측 요청 제한을 뜻합니다.
+
+- 로그인 페이지 429 응답 시 WebView 재요청을 중단하고 **추가 새로고침을 차단**합니다. 서버에서 `Retry-After`(초 단위)를 전달하면 해당 시간을 우선 사용하고, 없으면 반복 요청을 피하기 위해 앱이 자체적으로 60분을 기다립니다. **앱의 타이머는 Instagram의 제한 해제 시각이 아닙니다.**
+- 로그인 페이지 429는 익명 프로필·게시글 조회에도 반영되어 불필요한 연쇄 재시도를 줄입니다. 다음 앱 실행 시에도 대기 상태를 유지합니다.
+- 로그인 화면의 **상태 확인**은 로컬 대기 상태만 확인하고 네트워크 요청하지 않습니다. 대기 시간이 끝났을 때 사용자가 직접 한 번 다시 시도할 수 있습니다.
+- **외부에서 Instagram 상태 확인**은 다른 브라우저/Instagram 앱에서 같은 사이트가 열리는지 비교하기 위한 기능입니다. 그쪽에서 로그인하더라도 이 앱에 세션이 자동으로 복사되지는 않습니다.
+- GitHub 모바일 앱에서 Actions Artifacts가 보이지 않는 문제를 줄이기 위해 같은 저장소에서 만든 PR 빌드를 `test-pr-1-latest` 같은 테스트용 Releases에도 설치 가능한 `.apk` 파일로 직접 게시합니다. 해당 릴리스는 개발용이며 출시 품질 인증을 뜻하지 않습니다.
+
+HTTP 429가 지속된다면 충분한 시간 동안 접속을 멈춘 뒤 **공식 Instagram 앱이나 일반 브라우저에서도** 같은 현상인지 확인하세요. APK를 바꾸는 것만으로 Instagram 서버 제한을 해제할 수는 없습니다.
+
+
+## v0.3.9: Chrome 로그인 정상 / 앱 내 WebView 제한 대응
+
+Chrome에서는 Instagram 로그인이 가능하지만 앱의 WebView 및 익명 Python 요청에서 HTTP 429가 발생하는 사례를 반영했습니다.
+
+- **Chrome에서 Instagram 열기**: 앱에 아이디를 입력한 뒤 Chrome으로 해당 프로필을 엽니다. Chrome에 이미 로그인했다면 그 세션으로 게시글과 릴스를 탐색할 수 있습니다.
+- **Chrome에서 링크 공유**: Chrome의 공유 메뉴에서 `InstaYtGrabber`를 선택하거나 게시물/릴스 주소를 복사해 앱의 **게시글·릴스 링크 저장** 칸에 붙여넣으세요. `/p/...`, `/reel/...`, `/reels/...` 주소를 식별하고 추적 매개변수를 제거합니다.
+- **Chrome 세션은 Android WebView/Chaquopy에 자동 이전되지 않습니다.** 링크를 공유하는 것은 로그인 세션을 공유하는 것과 다릅니다. 따라서 Instagram이 실제 미디어 요청에 대해 HTTP 429 또는 인증 제한을 내리면 링크 다운로드도 실패할 수 있습니다. 그런 경우 오류 기록에 `IG-LINK-429`/`IG-LINK-DOWNLOAD`를 남깁니다.
+- **세션 쿠키 삭제 방지**: Instagram 게시물 다운로드 전용 WebView의 공개 조회에서도 전체 CookieManager를 비우던 오래된 코드를 제거했습니다.
+- **Android 10+ 다운로드 저장 버그**: gallery-dl이 공용 Downloads에 직접 쓰려고 하던 코드를 수정했습니다. 앱의 임시 디렉터리에서 다운로드를 완료한 뒤 MediaStore를 통해 `Downloads/InstaYtGrabber/Instagram/`에 저장합니다.
+- Chrome 공유 링크 처리의 유효/잘못된 URL 단위 테스트를 추가했습니다. 로그인 성공과 미디어 다운로드 성공은 **실제 휴대폰**에서 각각 확인해야 합니다.
+
+참고: 앱에서 Chrome 브라우저의 로그인 쿠키를 읽거나 Chrome에 표시된 임의의 프로필 목록을 자동 추출하는 기능은 제공하지 않습니다. 계정 정보나 브라우저 보안 경계를 우회하지 않습니다.
+
+
+## v0.4.0: 다른 Android 다운로더 구조 참고 후 미디어 엔진 재설계
+
+실제 기기에서 Instagram Chrome 로그인은 정상인데 Instaloader 프로필 조회는 `web_profile_info` 429를 반환했습니다. 기존 앱에는 게시물 다운로드조차 **Instagram 홈을 열고 `history.pushState`로 URL만 바꾸는 오류**가 남아 있어, 이 경로는 실제 게시물 데이터를 로드하지 못했습니다.
+
+### 참고 구현 및 차이
+
+- [Flipper the Ripper](https://github.com/pepperonas/flipper-the-ripper) (MIT, `WebViewExtractor.kt`, `WebViewYtDlpEngine.kt`): 실제 릴스 embed 웹페이지 로드, 비디오 요청/CDN 미디어 주소 감지, 원본 요청 헤더 활용. **아이디어를 참고하여 별도 Kotlin 구현을 작성**했습니다.
+- [InstaDownload](https://github.com/Orang-Studio/InstaDownload) (GPL-3.0): 프로필 전체 조회와 개별 게시물 URL 조회를 분리하고, 공개 페이지에 포함된 JSON에서 해당 shortcode 미디어 데이터를 식별. GPL 코드를 복사하지 않고 구조만 참고했습니다.
+- [gallery-dl](https://github.com/mikf/gallery-dl) (GPL-2.0) 및 [yt-dlp Instagram extractor](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/instagram.py): Instagram은 익명 API 및 웹 페이지 요청을 제한할 수 있으므로 개별 미디어 링크와 프로필 API 요청을 별도로 다뤄야 합니다.
+
+### 변경 사항
+
+1. 링크 저장은 `https://www.instagram.com/p/<code>/embed/captioned/` 또는 `/reel/<code>/embed/captioned/` **실제 페이지를 WebView로 열어** 해당 미디어를 찾습니다. 홈 페이지에서 주소만 바꾸는 가짜 라우팅은 제거했습니다.
+2. 단일 미디어는 프로필 조회용 `web_profile_info` 엔드포인트를 **선행 호출하지 않습니다**. 웹페이지 DOM·embed JSON·브라우저에 표시된 비디오 CDN 요청을 수집하고, 실패 시 한 번만 기존 gallery-dl을 폴백합니다.
+3. 직접 가져온 미디어 URL은 Instagram CDN 도메인(Instagram, cdninstagram, fbcdn) 및 HTTPS인지 검증하고, 실제 브라우저의 Referer/Range/쿠키(해당 CDN 도메인의 쿠키) 등을 활용해 저장을 시도합니다. HTML/JSON 오류 응답은 미디어 파일로 저장하지 않습니다.
+4. 프로필 API 429와 **개별 미디어 HTTP 429 대기**는 구분합니다. 미디어에 직접 429가 오면 30분 동안 같은 미디어 시도를 막습니다. 앱의 대기 시간은 서버 제한 해제를 보장하지 않습니다.
+5. Chrome에서 공유한 게시글·릴스 링크 저장을 첫 화면에 배치하고, 프로필 ID로 전체 목록 가져오기는 별도의 **실험적** 기능으로 명시했습니다.
+
+### 한계
+
+- Chrome 쿠키를 앱으로 자동 복사하지 않습니다. Android 내장 WebView에서 Instagram 로그인이 차단될 수 있고, 공개 미디어 embed 요청도 HTTP 429나 로그인을 요구할 수 있습니다.
+- 실제 릴스 원본 다운로드, 사진 여러 장, 하이라이트·스토리 및 프로필 전체 목록 **성공은 아직 실기기에서 확인해야 합니다**. 테스트 빌드 성공은 Instagram 서버 접근 성공을 의미하지 않습니다.
+- 다수 게시물 자동 수집이나 보안 제한 우회 대신 **링크 하나씩 다운로드**를 우선 검증합니다.
+
+## v0.4.1: 앱 내부 독립 브라우저(GeckoView) 시험 구현
+
+v0.4.0 실기기에서 **Instagram 로그인 페이지가 흰색으로만 표시**되는 현상이 계속되어, 외부 Chrome으로 이동하던 접근법을 교체했습니다.
+
+- **앱 안에 Mozilla GeckoView(Firefox 엔진) 158 포함:** 외부 브라우저 없이 InstaYtGrabber 화면 내부에서 Instagram 공식 사이트를 열고 로그인, 프로필·게시물·릴스를 탐색할 수 있습니다.
+- Android System WebView와 독립적인 브라우저 세션입니다. **GeckoView 쿠키는 GeckoView에서만 유지**되며 Android WebView/Chaquopy/Chrome과 자동 공유되지 않습니다.
+- 앱에 포함된 Gecko WebExtension은 열린 Instagram 게시물·릴스의 DOM에서 보이는 사진·동영상 주소만 파악하고, 사용자가 현재 게시물 저장을 누르면 허용된 Instagram/Meta CDN HTTPS 링크를 MediaStore로 저장하려 시도합니다.
+- 미디어 수집 코드는 쿠키·비밀번호를 읽거나 외부 서버로 전송하지 않습니다. nativeMessaging은 앱 안의 GeckoSession에만 연결됩니다.
+- 전체 프로필 목록 조회/스토리·하이라이트 다운로드는 별도 구형 엔진으로 남아 있으며 이번 브라우저의 로그인 세션을 자동 상속하지 않습니다. 검증 완료라고 표시하지 않습니다.
+- Firefox 엔진으로도 Instagram에서 인증을 거부하거나 CDN 다운로드 HTTP 403/429가 발생할 수 있습니다. **GeckoView 로그인이 실제로 열리는지와 로그인 후 저장 성공**은 실기기 테스트가 필요합니다.
+- Firefox 엔진을 APK에 내장하므로 앱 용량은 이전 약 200MB보다 커질 수 있습니다.
+- Mozilla GeckoView는 MPL-2.0 라이선스입니다: https://www.mozilla.org/en-US/MPL/2.0/
+
+참고: [Mozilla GeckoView 공식 문서](https://firefox-source-docs.mozilla.org/mobile/android/geckoview/consumer/geckoview-quick-start.html), [GeckoView WebExtensions 문서](https://firefox-source-docs.mozilla.org/mobile/android/geckoview/consumer/web-extensions.html).

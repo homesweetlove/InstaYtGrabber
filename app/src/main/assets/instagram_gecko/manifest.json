@@ -1,0 +1,28 @@
+{
+  "manifest_version": 2,
+  "name": "InstaYtGrabber local media helper",
+  "version": "1.0.0",
+  "description": "Collects media currently visible in the app's own Instagram browser",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "instagram-view@instaytgrabber.local"
+    }
+  },
+  "permissions": [
+    "nativeMessaging",
+    "nativeMessagingFromContent",
+    "geckoViewAddons"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://instagram.com/*",
+        "*://*.instagram.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
