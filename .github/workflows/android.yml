@@ -48,7 +48,7 @@ jobs:
           fi
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.13'
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
@@ -61,7 +61,7 @@ jobs:
           bash -n .github/scripts/build-quickjs-android.sh
       - name: Install Android NDK and native build tools
         run: |
-          sdkmanager "ndk;27.2.12479018" "cmake;3.22.1" >/dev/null
+          sdkmanager "platforms;android-36" "ndk;27.2.12479018" "cmake;3.22.1" >/dev/null
           command -v ninja >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y ninja-build)
       - name: Build bundled QuickJS-NG runtime
         run: bash .github/scripts/build-quickjs-android.sh
