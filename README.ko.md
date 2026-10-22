@@ -199,3 +199,18 @@ Chrome에서는 Instagram 로그인이 가능하지만 앱의 WebView 및 익명
 - Chrome 쿠키를 앱으로 자동 복사하지 않습니다. Android 내장 WebView에서 Instagram 로그인이 차단될 수 있고, 공개 미디어 embed 요청도 HTTP 429나 로그인을 요구할 수 있습니다.
 - 실제 릴스 원본 다운로드, 사진 여러 장, 하이라이트·스토리 및 프로필 전체 목록 **성공은 아직 실기기에서 확인해야 합니다**. 테스트 빌드 성공은 Instagram 서버 접근 성공을 의미하지 않습니다.
 - 다수 게시물 자동 수집이나 보안 제한 우회 대신 **링크 하나씩 다운로드**를 우선 검증합니다.
+
+## v0.4.1: 앱 내부 독립 브라우저(GeckoView) 시험 구현
+
+v0.4.0 실기기에서 **Instagram 로그인 페이지가 흰색으로만 표시**되는 현상이 계속되어, 외부 Chrome으로 이동하던 접근법을 교체했습니다.
+
+- **앱 안에 Mozilla GeckoView(Firefox 엔진) 158 포함:** 외부 브라우저 없이 InstaYtGrabber 화면 내부에서 Instagram 공식 사이트를 열고 로그인, 프로필·게시물·릴스를 탐색할 수 있습니다.
+- Android System WebView와 독립적인 브라우저 세션입니다. **GeckoView 쿠키는 GeckoView에서만 유지**되며 Android WebView/Chaquopy/Chrome과 자동 공유되지 않습니다.
+- 앱에 포함된 Gecko WebExtension은 열린 Instagram 게시물·릴스의 DOM에서 보이는 사진·동영상 주소만 파악하고, 사용자가 현재 게시물 저장을 누르면 허용된 Instagram/Meta CDN HTTPS 링크를 MediaStore로 저장하려 시도합니다.
+- 미디어 수집 코드는 쿠키·비밀번호를 읽거나 외부 서버로 전송하지 않습니다. nativeMessaging은 앱 안의 GeckoSession에만 연결됩니다.
+- 전체 프로필 목록 조회/스토리·하이라이트 다운로드는 별도 구형 엔진으로 남아 있으며 이번 브라우저의 로그인 세션을 자동 상속하지 않습니다. 검증 완료라고 표시하지 않습니다.
+- Firefox 엔진으로도 Instagram에서 인증을 거부하거나 CDN 다운로드 HTTP 403/429가 발생할 수 있습니다. **GeckoView 로그인이 실제로 열리는지와 로그인 후 저장 성공**은 실기기 테스트가 필요합니다.
+- Firefox 엔진을 APK에 내장하므로 앱 용량은 이전 약 200MB보다 커질 수 있습니다.
+- Mozilla GeckoView는 MPL-2.0 라이선스입니다: https://www.mozilla.org/en-US/MPL/2.0/
+
+참고: [Mozilla GeckoView 공식 문서](https://firefox-source-docs.mozilla.org/mobile/android/geckoview/consumer/geckoview-quick-start.html), [GeckoView WebExtensions 문서](https://firefox-source-docs.mozilla.org/mobile/android/geckoview/consumer/web-extensions.html).
